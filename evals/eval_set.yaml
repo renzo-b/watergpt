@@ -1,0 +1,55 @@
+# eval_set.yaml — operator questions for regression testing the agent.
+# Rerun after every change to tools, prompts, or retrieval. Note what breaks.
+
+meta:
+  version: 0.1
+  notes: "Grounding rule: plant-specific claims must cite doc+page or say 'not found'."
+
+cases:
+  - id: dosing-runoff-01
+    type: open_grounded # open question, answer should come from docs/knowledge
+    question: >
+      Raw water turbidity jumped from 2 to 40 NTU overnight after spring
+      runoff, TOC is up too. We dose alum for coagulation — how should I
+      think about adjusting the dose, and what does it do to pH/alkalinity?
+    expected_tools: [search_plant_docs, search_plant_historical_logs] # ideally also checks plant_notes for past events
+    expected_behavior: >
+      Explains higher turbidity/TOC generally needs more coagulant; notes alum
+      consumes alkalinity and drops pH so may need pH adjustment; grounds
+      specifics in jar-test procedure if in docs; recommends jar test rather
+      than giving a single "correct" dose number.
+    must_include: [jar test, alkalinity, pH]
+    must_not: [invents a specific mg/L dose as if it were plant-verified]
+    grounding: cite_or_disclaim
+    notes: "" # fill in after each run: what actually happened
+
+  - id: ct-calc-01
+    type: calculation # must call the calculator, never do mental math
+    question: >
+      Contact tank effective volume 150 m3, flow 45 L/s, free chlorine
+      residual 0.8 mg/L, water temp 5 C, pH 7.2, baffling factor 0.5.
+      Do I meet CT for 0.5-log Giardia inactivation?
+    expected_tools: [calc_ct]
+    expected_answer: >
+      Agent calls calc_ct, reports CT_actual vs CT_required from the table,
+      states pass/fail. (Fill exact numbers once calc_ct is implemented and
+      pin them here as the regression target.)
+    must_include: [CT, pass, "or", fail]
+    must_not: [does the arithmetic itself without calling the tool]
+    grounding: tool_result
+    notes: ""
+
+  - id: nameplate-photo-01
+    type: photo # image in, extract then look up
+    question: "What's the rebuild/seal kit part number for this metering pump?"
+    attachment: fixtures/pump_nameplate_01.jpg
+    expected_tools: [lookup_equipment, search_manuals]
+    expected_behavior: >
+      Extracts manufacturer/model/serial from the nameplate image, matches
+      against the manuals library, returns the parts breakdown / seal kit
+      number with a doc+page citation; if no manual is ingested for that
+      model, says so and names the manufacturer/successor to contact.
+    must_include: [model, part]
+    must_not: [guesses a part number with no source]
+    grounding: cite_or_disclaim
+    notes: ""
