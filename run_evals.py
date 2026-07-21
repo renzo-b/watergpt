@@ -40,6 +40,15 @@ GREEN, RED, YELLOW, DIM, RESET = (
     "\033[0m",
 )
 
+import re
+
+
+def _present(phrase, text):
+    p = str(phrase).lower()
+    if len(p) <= 4 and " " not in p:  # short tokens: pH, CT, TOC, NTU
+        return re.search(rf"\b{re.escape(p)}\b", text) is not None
+    return p in text
+
 
 def grade(case, answer, tool_calls):
     """Return (status, list_of_failure_strings). status in pass/fail/warn."""
@@ -58,10 +67,10 @@ def grade(case, answer, tool_calls):
 
     low = answer.lower()
     for phrase in case.get("must_include", []):
-        if str(phrase).lower() not in low:
+        if not _present(phrase, low):
             failures.append(f"missing phrase: {phrase!r}")
     for phrase in case.get("must_not_include", []):
-        if str(phrase).lower() in low:
+        if _present(phrase, low):
             failures.append(f"forbidden phrase present: {phrase!r}")
 
     # Grounding contract: a cite_or_disclaim case should either cite a page or
@@ -77,6 +86,8 @@ def grade(case, answer, tool_calls):
                 "general guidance",
                 "not from the plant",
                 "wasn't in",
+                "tell me",
+                "in the uploaded documents",
             ]
         )
         if not (cited or disclaimed):

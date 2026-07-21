@@ -19,9 +19,58 @@ cases:
       specifics in jar-test procedure if in docs; recommends jar test rather
       than giving a single "correct" dose number.
     must_include: [jar test, alkalinity, pH]
-    must_not: [invents a specific mg/L dose as if it were plant-verified]
+    must_not_include:
+      [invents a specific mg/L dose as if it were plant-verified]
     grounding: cite_or_disclaim
     notes: "" # fill in after each run: what actually happened
+
+  # Osmotic pressure uses the standard TDS approximation, which is fine for brackish feeds and poor for high-sulphate or seawater.
+  # Flag it if you go beyond municipal brackish RO.
+  - id: ro-cleaning-insufficient-data-01
+    type: clarification
+    question: >
+      My last RO cleaning was 4 months ago. Normalized permeate flow is
+      37 m3/h and pressure drop is 1.4 bar. Is it time to clean the membranes?
+    expected_tools: [search_plant_docs, search_plant_historical_logs]
+    expected_behavior: >
+      Recognizes the values are meaningless without reference conditions and
+      asks for what's missing before advising: baseline/post-cleaning
+      normalized permeate flow, baseline normalized dP, and normalized salt
+      passage trend. Checks plant docs for the RO system's design basis and
+      any cleaning criteria in the O&M manual or SOP; if absent, says so.
+      Explains the three standard triggers in percent-change terms rather
+      than absolute numbers. Does NOT give a clean/don't-clean verdict.
+      May note that elapsed time alone is not a cleaning criterion.
+    must_include: [baseline]
+    must_not_include:
+      [
+        "time to clean",
+        "not time to clean",
+        "assumed a baseline",
+        "typical baseline",
+      ]
+    grounding: cite_or_disclaim
+    notes: ""
+
+  - id: ro-cleaning-with-baseline-01
+    type: open_grounded
+    question: >
+      RO train A: normalized permeate flow is 37 m3/h, down from 44 m3/h
+      after the last clean. Normalized dP across stage 1 is 1.4 bar, was
+      1.05 bar. Normalized salt passage is up about 8%. Should I clean?
+    expected_tools: [search_plant_docs]
+    expected_behavior: >
+      Computes the changes (~16% flow decline, ~33% dP rise), compares to the
+      standard 10-15% flow / 15% dP triggers, and concludes cleaning is
+      warranted. Notes the dP-dominant pattern points toward fouling
+      (particulate/biological) rather than scaling, which affects cleaning
+      chemistry choice. Defers to the plant's own cleaning SOP and the
+      membrane manufacturer's limits if found in docs; flags that exceeding
+      manufacturer dP limits risks telescoping damage.
+    must_include: [dP]
+    must_not_include: []
+    grounding: cite_or_disclaim
+    notes: ""
 
   - id: ct-calc-01
     type: calculation # must call the calculator, never do mental math
@@ -33,9 +82,9 @@ cases:
     expected_answer: >
       Agent calls calc_ct, reports CT_actual vs CT_required from the table,
       states pass/fail. (Fill exact numbers once calc_ct is implemented and
-      pin them here as the regression target.)
-    must_include: [CT, pass, "or", fail]
-    must_not: [does the arithmetic itself without calling the tool]
+      pin them here as the regression target.) T10 27.8 min, CT achieved 22.2 mg·min/L.
+    must_include: ["22.2", "PASS"]
+    must_not_include: []
     grounding: tool_result
     notes: ""
 
@@ -50,6 +99,6 @@ cases:
       number with a doc+page citation; if no manual is ingested for that
       model, says so and names the manufacturer/successor to contact.
     must_include: [model, part]
-    must_not: [guesses a part number with no source]
+    must_not_include: [guesses a part number with no source]
     grounding: cite_or_disclaim
     notes: ""
