@@ -150,7 +150,7 @@ LOGS_CHUNKS = [
 ]
 
 
-def search_plant_historical_logs(
+def search_plant_logs(
     query,
     plant_id,
     date_from=None,
@@ -247,7 +247,7 @@ TOOL_SCHEMAS = [
         },
     },
     {
-        "name": "search_plant_historical_logs",
+        "name": "search_plant_logs",
         "description": (
             "Search this plant's dated operator log entries and event records — "
             "what actually happened here and what operators did about it. Each "
@@ -345,6 +345,29 @@ TOOL_SCHEMAS = [
         },
     },
     {
+        "name": "lookup_equipment",
+        "description": (
+            "Look up an asset in THIS plant's equipment registry by tag, name, "
+            "manufacturer, or model. Call this FIRST whenever a question names "
+            "or shows a piece of equipment, so you can then search manuals with "
+            "the exact model number rather than a description. Returns the "
+            "registry entry: tag, name, manufacturer, model, install year."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": (
+                        "Equipment tag (e.g. 'CP-1'), common name, "
+                        "manufacturer, or model string read off a nameplate."
+                    ),
+                }
+            },
+            "required": ["query"],
+        },
+    },
+    {
         "name": "calc_ct",
         "description": (
             "Calculate CT achieved versus CT required for 0.5-log Giardia "
@@ -413,7 +436,7 @@ TOOL_SCHEMAS = [
 
 _REGISTRY = {
     "search_plant_docs": search_plant_docs,
-    "search_plant_historical_logs": search_plant_historical_logs,
+    "search_plant_logs": search_plant_logs,
     "search_manuals": search_manuals,
     "search_regulations": search_regulations,
     "lookup_equipment": lookup_equipment,
@@ -426,6 +449,6 @@ def dispatch(name, tool_input, plant_id="demo"):
     fn = _REGISTRY.get(name)
     if fn is None:
         raise ValueError(f"unknown tool: {name}")
-    if name in ("search_plant_docs", "search_plant_historical_logs"):
+    if name in ("search_plant_docs", "search_plant_logs"):
         return fn(plant_id=plant_id, **tool_input)
     return fn(**tool_input)

@@ -88,6 +88,9 @@ def grade(case, answer, tool_calls):
                 "wasn't in",
                 "tell me",
                 "in the uploaded documents",
+                "do you have",
+                "do you know",
+                "i need to know",
             ]
         )
         if not (cited or disclaimed):

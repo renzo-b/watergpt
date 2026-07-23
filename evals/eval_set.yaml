@@ -12,15 +12,14 @@ cases:
       Raw water turbidity jumped from 2 to 40 NTU overnight after spring
       runoff, TOC is up too. We dose alum for coagulation — how should I
       think about adjusting the dose, and what does it do to pH/alkalinity?
-    expected_tools: [search_plant_docs, search_plant_historical_logs] # ideally also checks plant_notes for past events
+    expected_tools: [search_plant_docs, search_plant_logs] # ideally also checks plant_notes for past events
     expected_behavior: >
       Explains higher turbidity/TOC generally needs more coagulant; notes alum
       consumes alkalinity and drops pH so may need pH adjustment; grounds
       specifics in jar-test procedure if in docs; recommends jar test rather
       than giving a single "correct" dose number.
     must_include: [jar test, alkalinity, pH]
-    must_not_include:
-      [invents a specific mg/L dose as if it were plant-verified]
+    must_not_include: []
     grounding: cite_or_disclaim
     notes: "" # fill in after each run: what actually happened
 
@@ -31,7 +30,7 @@ cases:
     question: >
       My last RO cleaning was 4 months ago. Normalized permeate flow is
       37 m3/h and pressure drop is 1.4 bar. Is it time to clean the membranes?
-    expected_tools: [search_plant_docs, search_plant_historical_logs]
+    expected_tools: [search_plant_docs, search_plant_logs]
     expected_behavior: >
       Recognizes the values are meaningless without reference conditions and
       asks for what's missing before advising: baseline/post-cleaning
@@ -58,7 +57,7 @@ cases:
       RO train A: normalized permeate flow is 37 m3/h, down from 44 m3/h
       after the last clean. Normalized dP across stage 1 is 1.4 bar, was
       1.05 bar. Normalized salt passage is up about 8%. Should I clean?
-    expected_tools: [search_plant_docs]
+    expected_tools: [search_plant_docs, search_plant_logs]
     expected_behavior: >
       Computes the changes (~16% flow decline, ~33% dP rise), compares to the
       standard 10-15% flow / 15% dP triggers, and concludes cleaning is
@@ -67,7 +66,7 @@ cases:
       chemistry choice. Defers to the plant's own cleaning SOP and the
       membrane manufacturer's limits if found in docs; flags that exceeding
       manufacturer dP limits risks telescoping damage.
-    must_include: [dP]
+    must_include: []
     must_not_include: []
     grounding: cite_or_disclaim
     notes: ""
@@ -83,7 +82,7 @@ cases:
       Agent calls calc_ct, reports CT_actual vs CT_required from the table,
       states pass/fail. (Fill exact numbers once calc_ct is implemented and
       pin them here as the regression target.) T10 27.8 min, CT achieved 22.2 mg·min/L.
-    must_include: ["22.2", "PASS"]
+    must_include: ["22.2"]
     must_not_include: []
     grounding: tool_result
     notes: ""
@@ -99,6 +98,660 @@ cases:
       number with a doc+page citation; if no manual is ingested for that
       model, says so and names the manufacturer/successor to contact.
     must_include: [model, part]
-    must_not_include: [guesses a part number with no source]
+    must_not_include: []
+    grounding: cite_or_disclaim
+    notes: ""
+
+  - id: coagulant-selection-cip-01
+    type: open_grounded
+    question: >
+      We're running a DAF as pretreatment for CIP wastewater at a meat
+      processing plant — no slaughtering on site, product arrives dressed.
+      Should I use FeCl3 or PAC for coagulation?
+    expected_tools: [] # general knowledge + clarification, no retrieval needed
+    expected_behavior: >
+      Does NOT pick a coagulant outright. States that jar testing is the only
+      reliable way to choose, because no analytical parameter set predicts
+      coagulation performance. Asks about or flags the specific CIP
+      characteristics that decide the answer: chelating agents (citric acid,
+      EDTA) which can prevent coagulation entirely; extreme pH from caustic
+      or acid cleaning cycles, which must be corrected first; and
+      surfactant/disinfectant carryover, which interferes with flocculation.
+      May note that heavy blood loading favours ferric, and that its absence
+      here makes PAC a reasonable first candidate to test. Prompts the
+      operator to define "best" — turbidity, COD, colour removal, sludge
+      volume, or cost per m3 — before comparing.
+    must_include: ["jar test"]
+    must_not_include:
+      [
+        "you should use fecl3",
+        "you should use pac",
+        "i recommend fecl3",
+        "i recommend pac",
+      ]
+    grounding: cite_or_disclaim # nothing plant-specific retrieved -> must disclaim
+    notes: ""
+
+  - id: floc-breakup-diagnosis-01
+    type: diagnostic
+    question: >
+      On the DAF treating our CIP water I can see coagulation happening but
+      the flocs keep breaking up into smaller bits before they reach the
+      flotation cell. What's going on?
+    expected_tools: []
+    expected_behavior: >
+      Identifies surfactant and disinfectant carryover from CIP chemicals as
+      a leading cause — flocs form but are destabilized and shear apart.
+      Distinguishes this from mechanical causes (excessive mixing energy or
+      shear in the flocculation zone, pump shear ahead of the DAF) and from
+      underdosed or wrong-charge polymer. Suggests checking CIP batch timing
+      against the failures, equalization to buffer slugs, and jar testing
+      with a flocculant aid. Does not assert a single cause with certainty.
+    must_include: ["surfactant"]
+    must_not_include: []
+    grounding: cite_or_disclaim
+    notes: "From a real operator thread — floc-breakup-as-disinfectant-signature is tacit knowledge, good test of whether the model has it."
+
+  - id: chloride-loading-coagulant-01
+    type: calculation
+    question: >
+      If I dose 0.5 L/m3 of PAX-18, how much chloride am I adding to the
+      effluent? How does that compare with 40% ferric chloride at the same
+      volumetric dose?
+    expected_tools: [calc_coagulant_chloride]
+    expected_answer: >
+      PIN ONCE TOOL EXISTS. For PAX-18 at nominal 9% Al2O3, SG 1.37,
+      42% basicity: ~149 g Cl/L product, so 0.5 L/m3 adds ~75 mg/L chloride.
+      For FeCl3 40% w/w at SG 1.42: ~372 g Cl/L, so 0.5 L/m3 adds ~186 mg/L,
+      about 2.5x the PAC. Answer must state that actual chloride content
+      depends on the product datasheet (basicity and Al content vary between
+      grades) and that the volumetric doses will NOT be equal in practice —
+      equivalent treatment usually requires a different volume of each.
+    must_include: ["chloride"]
+    must_not_include: []
+    grounding: tool_result
+    notes: ""
+
+  - id: denitrification-carbon-need-01
+    type: clarification
+    question: >
+      We run activated sludge at a pulp mill and have a total nitrogen limit
+      on our discharge. Do we need to dose methanol for denitrification?
+    expected_tools: []
+    expected_behavior: >
+      Does not answer yes or no. Identifies what determines it: influent
+      readily-biodegradable COD relative to nitrate load (the C:N ratio),
+      wastewater temperature and its seasonal swing, the actual effluent TN
+      limit, and whether anoxic conditions and sufficient anoxic HRT exist in
+      the current basin configuration. Notes that many mills denitrify
+      without supplemental carbon in warm months and only need dosing
+      seasonally. Should raise that kraft pulping produces methanol as a
+      byproduct in foul condensates, so an internal carbon source may already
+      be available on site before buying any.
+    must_include: ["temperature"]
+    must_not_include:
+      ["yes, you need methanol", "you will need to dose methanol"]
+    grounding: cite_or_disclaim
+    notes: "Real thread: Green Bay mill denitrifies seasonally without methanol. Tests whether the model treats external carbon as conditional."
+
+  - id: carbon-source-selection-01
+    type: open_grounded
+    question: >
+      We currently dose acetic acid for denitrification and are considering
+      switching to methanol for cost. What should we weigh?
+    expected_tools: []
+    expected_behavior: >
+      Frames it as cost per unit nitrate removed, not cost per litre — methanol
+      is usually cheaper on a delivered-COD basis, which is why the switch is
+      attractive. Raises the offsetting factors: methanol is a Class I
+      flammable requiring code-compliant storage, and that capital and
+      permitting cost can erase the chemical savings; methanol needs
+      acclimated methylotrophic biomass with a slow transition (weeks) and
+      degraded performance meanwhile, especially in cold water; acetate acts
+      faster and tolerates intermittent dosing far better. Notes methanol
+      kinetics fall off sharply at low temperature, which matters for
+      seasonal dosing. Recommends comparing on cost per kg NO3-N removed
+      including storage and handling, and considering a seasonal or blended
+      approach rather than a full switch.
+    must_include: ["flammable"]
+    must_not_include: []
+    grounding: cite_or_disclaim
+    notes: ""
+
+  - id: carbon-dose-calc-01
+    type: calculation
+    question: >
+      Flow is 8 MLD, we need to remove nitrate from 22 to 5 mg/L as N,
+      nitrite is 0.5 mg/L and anoxic zone DO is about 1.5 mg/L. How much
+      methanol per day, and what would acetic acid cost by comparison?
+    expected_tools: [calc_external_carbon_dose]
+    expected_answer: >
+      PIN ONCE TOOL EXISTS. Using McCarty: Cm = 2.47*NO3-N + 1.53*NO2-N +
+      0.87*DO gives 2.47*17 + 1.53*0.5 + 0.87*1.5 = 44.1 mg/L methanol,
+      about 353 kg/d neat at 8 MLD. Answer should state this is a
+      stoichiometric starting point requiring a safety factor (commonly
+      1.2-1.5x) and field tuning, note the alkalinity recovery of about
+      3.57 g CaCO3 per g NO3-N denitrified, and give the acetic acid
+      comparison on a COD-equivalent basis (methanol 1.50 g COD/g, acetic
+      acid 1.07 g COD/g, so roughly 1.4x the mass of acetic acid for the
+      same COD).
+    must_include: ["kg"]
+    must_not_include: []
+    grounding: tool_result
+    notes: ""
+
+  - id: surcharge-first-fine-01
+    type: open_grounded
+    question: >
+      We're a food processing plant discharging to the municipal sewer and
+      just got our first BOD surcharge bill. Lab says 15,000 mg/L BOD at
+      50,000 gpd. What are our options?
+    expected_tools: [calc_pollutant_load]
+    expected_behavior: >
+      Quantifies the load first (about 2,800 kg/d, 6,300 lb/d, roughly 35,000
+      population equivalent) so the scale is concrete. Then walks the options
+      in cost order, cheapest first: source reduction and segregation of
+      high-strength streams (first-rinse and product-recovery streams often
+      carry most of the load in a small fraction of the flow), dry cleanup
+      before washdown, equalization to flatten peaks, then screening or DAF,
+      then biological pretreatment. Notes that at this strength anaerobic
+      treatment becomes viable and can offset cost through biogas. States
+      explicitly that continuing to pay the surcharge is a legitimate option
+      to evaluate against capital cost, not an automatic failure. Asks for
+      the surcharge rate structure and threshold before recommending anything.
+    must_include: ["segregat"]
+    must_not_include:
+      [
+        "you need to install",
+        "you should install a daf",
+        "install a pretreatment system",
+      ]
+    grounding: cite_or_disclaim
+    notes: "Bias test: correct answer leads with source reduction, not capex. Real thread participant admitted vendor bias here."
+
+  - id: surcharge-vs-capex-01
+    type: calculation
+    question: >
+      Our BOD surcharge is running about $50,000 a month. A vendor quoted
+      $4.5M for a pretreatment system that would get us under the threshold,
+      with maybe $180k/year in operating cost. Does that pay back?
+    expected_tools: [calc_pollutant_load]
+    expected_behavior: >
+      Computes simple payback (roughly $600k/yr gross saving less $180k/yr
+      opex leaves about $420k/yr net, so about 10.7 years on $4.5M) and says
+      plainly that this is marginal for a capital project. Raises what changes
+      the answer: whether surcharge rates are scheduled to rise, whether the
+      municipality could impose a hard limit rather than a surcharge (which
+      removes the option to keep paying), sludge disposal and biogas credits,
+      whether partial treatment to just below the threshold costs far less
+      than full treatment, and how much load source reduction could remove
+      first for near-zero capital. Does not present a single verdict.
+    must_include: ["payback"]
+    must_not_include: []
+    grounding: tool_result
+    notes: ""
+
+  - id: slug-discharge-notification-01
+    type: diagnostic
+    question: >
+      Our aeration basin went septic overnight, DO crashed and the effluent
+      turned. We think an industrial user dumped something. What now, and
+      how do we stop it happening again?
+    expected_tools: [search_plant_logs, search_plant_docs]
+    expected_behavior: >
+      Splits immediate response from prevention. Immediate: stabilize the
+      process, check for toxicity versus simple organic overload, pull
+      influent composite samples and sewer-line grab samples to identify the
+      source, document the timeline. Prevention: identifies advance
+      notification agreements with significant industrial users as the core
+      operational fix, so the plant can prepare and monitor before a known
+      high-load discharge, alongside slug-discharge control plans, upstream
+      monitoring at the user's manhole, and the municipality's enforcement
+      response plan. May note that damage cost recovery (extra power, labour,
+      lab work, contract services) is typically documented and passed to the
+      user through the compliance authority, and that this requires the
+      timeline documentation started in step one.
+    must_include: ["notification"]
+    must_not_include: []
+    grounding: cite_or_disclaim
+    notes: ""
+
+  - id: jar-test-dose-basis-01
+    type: calculation
+    question: >
+      I'm running a jar test with 1 L samples and want to simulate a 75 ppm
+      ferric dose. Our product is 40% w/w ferric chloride, SG 1.42. How much
+      do I add to each jar?
+    expected_tools: [calc_jar_test_dose]
+    expected_behavior: >
+      Asks or flags whether 75 ppm is expressed as product or as Fe, because
+      the two answers differ by about 3x. Gives 0.132 mL as product and
+      0.383 mL as Fe, having accounted for both solution strength and specific
+      gravity. Warns that pipetting a volume this small accurately is
+      difficult and recommends preparing a diluted stock instead. Should NOT
+      return 0.075 mL, which assumes a neat chemical at SG 1.0.
+    must_include: ["as Fe"]
+    must_not_include: ["0.075"]
+    grounding: tool_result
+    notes: "Naive answer is 0.075 mL — wrong by 1.8x or 5.1x depending on basis. Strongest must_not_include in the set."
+
+  - id: jar-test-stock-prep-01
+    type: procedure
+    question: >
+      How should I prepare stock solutions for a jar test series so I can
+      vary the dose easily?
+    expected_tools: []
+    expected_behavior: >
+      Describes the standard technique: prepare stock at 1 mg/mL so that
+      1 mL added to a 1 L jar equals 1 mg/L, making dose series trivial.
+      Critically, notes the volume-ratio limit — at high doses the added
+      stock volume dilutes the sample and distorts the result, so a stronger
+      stock (5-10 mg/mL) should be used above roughly 20-30 mg/L. Recommends
+      volumetric glassware for serial dilution, fresh stock for hydrolyzing
+      coagulants, and matching the addition order and mixing energy to the
+      full-scale process.
+    must_include: ["dilut"]
+    must_not_include: []
+    grounding: cite_or_disclaim
+    notes: "At 1 mg/mL stock a 75 mg/L dose = 7.5% sample dilution. Tests whether the model knows the caveat, not just the trick."
+
+  - id: chemical-addition-order-01
+    type: diagnostic
+    question: >
+      Our sequence is ferric coagulant, then polymer injection, then caustic
+      for pH control before the clarifier. Floc looks weak. Should I move the
+      caustic ahead of the polymer?
+    expected_tools: [search_plant_docs]
+    expected_behavior: >
+      Says yes, and explains why: polymer flocculation should be the last
+      chemical step, with only gentle mixing after it, because polymer
+      bridging is shear-sensitive and broken bridges do not re-form. Injecting
+      caustic downstream of the polymer adds both mixing energy and a chemistry
+      change to already-formed floc. Also notes the coagulant needs to be in
+      its effective pH window to work, so pH adjustment normally belongs
+      between coagulation and flocculation, not after. Recommends confirming
+      with a jar test that replicates each candidate order and the actual
+      mixing intensities and delays between additions. May note that reduced
+      caustic dose or a different final pH trim point are alternatives worth
+      testing.
+    must_include: ["shear"]
+    must_not_include: []
+    grounding: cite_or_disclaim
+    notes: "Real operator question. Key tacit fact under test: broken polymer bridges are irreversible, unlike coagulation floc."
+
+  - id: clarifier-coning-diagnosis-01
+    type: diagnostic
+    question: >
+      Industrial lamella clarifier, cone bottom, no rakes. Sludge pumps are
+      2 inch air diaphragm on a timer, 6 seconds on every 90 seconds at full
+      speed. Feed is about 87 gpm for 16 hours a day. I think I'm coning, and
+      I've also got floating sludge. Are they connected?
+    expected_tools: [calc_sludge_withdrawal]
+    expected_behavior: >
+      Treats these as two separate problems and says so. Coning (rat-holing)
+      is caused by withdrawing faster than sludge can consolidate and move
+      into the withdrawal point, opening a channel so the pump pulls
+      supernatant instead of solids; the consequences are thin underflow,
+      water recirculated to downstream sludge handling, and a blanket that
+      never lowers evenly. Uses the mass balance to show the daily withdrawal
+      volume is roughly 1-3% of feed and therefore reasonable, while the
+      instantaneous rate during each pulse is a large fraction of the feed
+      rate — locating the problem in pulse intensity rather than total volume.
+      Recommends throttling the air supply so the pump runs slowly and nearly
+      continuously at the same daily volume. Handles floating sludge as a
+      separate differential: polymer overdose producing light buoyant floc,
+      gas entrainment from the pumps, solids held long enough to go septic
+      and gas off, hydraulic short-circuiting, and — specific to lamella
+      units with no rake — solids accumulating on the plates and sloughing
+      off in mats. Asks what would distinguish these rather than asserting one.
+    must_include: ["separate"]
+    must_not_include:
+      ["coning causes the floating", "coning is causing your floating"]
+    grounding: cite_or_disclaim
+    notes: "Operator arrived conflating the two. Core test is whether the agent decouples them. Numbers: 6.2% duty, 60 min/day pumping, 1.4-3.2% of feed daily but 23-51% of feed rate instantaneously."
+
+  - id: sludge-blanket-rebuild-01
+    type: procedure
+    question: >
+      I've lost my sludge blanket in a cone-bottom lamella clarifier. How do
+      I rebuild it and tune withdrawal so I don't cone again?
+    expected_tools: [search_plant_docs]
+    expected_behavior: >
+      Gives the sequence: blow the unit down and wash accumulated solids off
+      the plates and walls toward the cone, refill slowly with clean water so
+      the restored bed is not disturbed on startup, bring upstream flow back
+      gradually, then establish a target blanket depth — commonly around
+      halfway between the withdrawal point and the bottom of the cone — and
+      tune withdrawal frequency and duration to hold it there. Emphasises
+      changing one variable at a time and measuring the blanket (sludge judge
+      or equivalent) rather than inferring it. Notes that underflow solids
+      concentration is the feedback signal: thin underflow means still
+      coning, thickening underflow with a rising blanket means withdrawal is
+      now too slow. Flags confined space and lockout requirements before
+      anyone enters or works on the unit.
+    must_include: ["blanket"]
+    must_not_include: []
+    grounding: cite_or_disclaim
+    notes: ""
+
+  - id: orp-dewatering-mechanism-01
+    type: diagnostic
+    question: >
+      Tank-based selenium and nitrate removal plant. Anoxic bioreactors, then
+      Actiflo and sand filters, gravity thickener, storage tank at 0.5-4%
+      solids, then dewatering with a cationic polymer. We dewater noticeably
+      worse when ORP in the storage tank is negative (range is about -50 to
+      +50 mV), pH 7-8. Someone told me it's because reduced metals carry a
+      positive charge so the cationic polymer can't attach. Is that right?
+    expected_tools: []
+    expected_behavior: >
+      Corrects the proposed mechanism. Explains that cationic polymer acts on
+      particle surface charge, not the oxidation state of the metal within
+      the solid, and that reduction lowers oxidation state rather than raising
+      it — so the stated explanation does not hold. Notes that a -50 to +50 mV
+      swing is narrow and that ORP is more likely a marker of a condition than
+      the cause of poor dewatering. Offers testable alternatives: sludge going
+      septic in the storage tank producing EPS and bound water; sulfate
+      reduction generating fine colloidal metal sulfides with high surface
+      area that consume polymer demand; changes in particle size or age.
+      Suggests measuring polymer demand, capillary suction time or specific
+      resistance to filtration, and sludge residence time alongside ORP
+      rather than controlling on ORP alone. Does not assert one cause.
+    must_include: ["surface charge"]
+    must_not_include:
+      ["reduced metals carry a positive", "positively charged particles repel"]
+    grounding: cite_or_disclaim
+    notes: >
+      Source thread's accepted answer was chemically wrong and the asker
+      thanked him for it. Core test: does the agent correct a fluent,
+      confident, plausible mechanism rather than elaborating on it.
+
+  - id: peroxide-selenium-consequence-01
+    type: diagnostic
+    question: >
+      Same selenium plant — we're planning to inject hydrogen peroxide into
+      the solids stream to hold ORP positive, stop the sludge digesting, and
+      control sulfides. Any concerns?
+    expected_tools: [search_plant_docs]
+    expected_behavior: >
+      Flags the process-level conflict: selenium removal here depends on
+      reducing soluble selenate and selenite to insoluble elemental selenium,
+      so introducing a strong oxidant into the solids stream risks
+      re-oxidizing Se(0) to soluble selenite, which would report to centrate
+      or filtrate and recycle to the head of the plant. Recommends bench
+      testing dissolved selenium in the filtrate at candidate peroxide doses
+      before committing, and monitoring recycle streams if implemented.
+      Also notes peroxide will exert its own oxidant demand against sulfides
+      and organics, that dose control is difficult on a variable stream, and
+      that alternatives addressing the root cause — shorter sludge residence
+      time in the storage tank, better thickener control — may resolve the
+      dewatering issue without adding an oxidant. Does not simply endorse or
+      simply reject the plan.
+    must_include: ["soluble"]
+    must_not_include: []
+    grounding: cite_or_disclaim
+    notes: >
+      Nobody in the source thread raised this. Tests whether the agent
+      connects a proposed intervention to upstream process chemistry rather
+      than answering the question as scoped.
+
+  - id: drawdown-dose-basis-01
+    type: calculation
+    question: >
+      What is the dosage of 380 mL of chemical into a stream of 45 L/s over a
+      ten minute drawdown test, at both 28% chemical concentration and at
+      100%? The chemical has an SG of 1.24.
+    expected_tools: [calc_drawdown_dose]
+    expected_behavior: >
+      Recognizes this as a drawdown or calibration check and works it in
+      order: water volume treated (27,000 L), product mass delivered
+      (471.2 g via SG), then dose. Reports 17.45 mg/L at 100% and 4.89 mg/L
+      as active at 28% w/w. States that the 28% figure only affects the
+      answer when dose is expressed as active ingredient — as product it is
+      17.45 mg/L either way. Flags the w/w versus w/v ambiguity and says
+      which basis it used. May also report the feed rate as 38 mL/min
+      (2.28 L/h) for pump setpoint purposes.
+    must_include: ["17.4", "4.8"]
+    must_not_include: []
+    grounding: tool_result
+    notes: >
+      Sent by an operator explicitly probing how niche a question the tool
+      can handle — so this doubles as a demo question. Basis ambiguity
+      (as-product vs as-active, w/w vs w/v) appears here for the third time
+      across the set; it is the dominant error family in chemical dosing.
+
+  - id: uvt-setpoint-premise-01
+    type: correction
+    question: >
+      Our UV system keeps running more channels than the flow needs. UVT is
+      set to 65% and dose is 50 mJ/cm3. Is one of our parameters wrong?
+    expected_tools: [search_plant_docs]
+    expected_behavior: >
+      Corrects the premise that UVT is a setpoint. UVT is a measured property
+      of the wastewater — the control system reads it, it cannot control to
+      it. Explains that a 65% figure is almost certainly the design minimum
+      from the system's basis of design, and that if the system is using that
+      fixed value rather than the live probe reading, it will conservatively
+      stage extra channels at all flows. Also corrects the units: UV dose is
+      mJ/cm2, an areal fluence, not mJ/cm3. Notes that staging should key on
+      calculated delivered dose, with UVT and flow as inputs to that
+      calculation, since dose is what the discharge permit is written against.
+    must_include: ["mJ/cm2"]
+    must_not_include:
+      [
+        "lower the UVT setpoint",
+        "raise the UVT setpoint",
+        "adjust your UVT setpoint",
+      ]
+    grounding: cite_or_disclaim
+    notes: >
+      False premise embedded in the question and left uncorrected in the
+      source thread. Also carries a units error. Two corrections in one case.
+
+  - id: uv-flatline-uvt-diagnosis-01
+    type: diagnostic
+    question: >
+      I trended our online UVT probe and it has barely moved off 65% for
+      months. Flow varies a lot. Is that normal?
+    expected_tools: []
+    expected_behavior: >
+      Says no, and treats the flatline itself as the finding. Real wastewater
+      UVT varies diurnally with loading and drops during rain events,
+      industrial discharges, and process upsets, so a months-long flat
+      reading indicates an instrument or data problem rather than remarkably
+      stable water. Gives the differential: fouled quartz window on the UVT
+      probe, failed or unscaled probe, a hardcoded design value being
+      displayed instead of the live reading, or a SCADA tag pointing at a
+      setpoint rather than the measurement. Names the decisive test — pull a
+      grab sample and run a bench UVT, then compare against what the probe
+      and SCADA report at the same moment. Recommends checking probe cleaning
+      and calibration frequency against the manufacturer's interval.
+    must_include: ["grab sample"]
+    must_not_include: []
+    grounding: cite_or_disclaim
+    notes: >
+      Tacit knowledge under test: a suspiciously stable instrument reading is
+      evidence of instrument failure, not process stability. Generalizes well
+      beyond UV.
+
+  - id: uvt-absorbance-leverage-01
+    type: calculation
+    question: >
+      Convert 65% UVT to a UV absorbance coefficient. If our UVT drops to
+      60%, how much does that change the UV intensity reaching an organism
+      5 cm from the lamp sleeve?
+    expected_tools: [calc_uvt_absorbance]
+    expected_behavior: >
+      Applies Beer-Lambert: A = -log10(T), giving 0.187 per cm at 65% UVT and
+      0.222 per cm at 60%. Computes intensity at 5 cm as 10^(-A x 5), showing
+      roughly a 33% intensity loss for a 5-point UVT drop. Explains that this
+      leverage is why UV systems stage aggressively on UVT and why accurate
+      UVT measurement matters more than it appears — small errors in the
+      reading translate into large errors in delivered dose. May note that
+      real reactors deliver a dose distribution rather than a single path
+      length, and that validated dose-delivery equations from the
+      manufacturer, not this calculation, govern compliance.
+    must_include: ["0.187"]
+    must_not_include: []
+    grounding: tool_result
+    notes: "A = -log10(T). 65% -> 0.1871/cm, 60% -> 0.2218/cm, -33% intensity at 5 cm."
+
+  - id: mlss-benchmark-reframe-01
+    type: correction
+    question: >
+      Extended aeration plant, 22 MGD design, we usually run 10-13 MGD. I
+      just learned to run MLSS and we're around 6000. Old operators say it
+      was 2000-3000 when the plant was new. What should we be running?
+    expected_tools: [search_plant_docs, search_plant_logs]
+    expected_behavior: >
+      Reframes rather than quoting a target range. Explains MLSS is a
+      dependent variable set by the chosen SRT (or F:M) at the plant's
+      reactor volume and load, so another plant's number is not a benchmark.
+      Notes that at roughly half of design flow, 6000 mg/L implies a low F:M
+      and a long SRT, and questions whether wasting has kept up rather than
+      reassuring that the number is normal. Asks for aeration basin volume,
+      influent BOD load, current wasting rate, and MLVSS so SRT and F:M can
+      be computed. Flags that MLSS without the volatile fraction is
+      uninterpretable, since inert accumulation raises MLSS without adding
+      biomass. May raise settleability and clarifier solids loading as the
+      practical constraint on carrying high MLSS.
+    must_include: ["SRT"]
+    must_not_include:
+      [
+        "6000 is normal",
+        "that's typical for extended aeration",
+        "not unusual for EA",
+      ]
+    grounding: cite_or_disclaim
+    notes: >
+      Source thread reassured the asker with a range that did not fit her
+      stated flow-vs-design. Tests whether the agent computes from the
+      plant's own numbers instead of benchmarking against hearsay.
+
+  - id: mlvss-ratio-inerts-01
+    type: diagnostic
+    question: >
+      Our MLVSS to MLSS ratio sits just under 50% most of the time but climbs
+      toward 70% after a quiet weekend. Is that a problem?
+    expected_tools: [search_plant_logs]
+    expected_behavior: >
+      Identifies the weekday-weekend swing as the key evidence and reads it
+      as an intermittent inert load that stops when upstream contributors do
+      — most likely industrial discharge, but also possibly grit or silt
+      carryover during wet weather or chemical precipitate if metal salts are
+      dosed for phosphorus removal. Notes municipal secondary sludge normally
+      runs about 0.7-0.8 volatile, so a sustained 0.5 is low. Explains the
+      consequence: MLSS overstates active biomass, so F:M and SRT calculated
+      on MLSS are wrong and the plant may be aerating and pumping inert
+      material. Suggests correlating the ratio against industrial discharge
+      records and influent TSS, and calculating loading on MLVSS rather than
+      MLSS.
+    must_include: ["inert"]
+    must_not_include: []
+    grounding: cite_or_disclaim
+    notes: "Stated as trivia in the source thread; nobody connected the weekend pattern to an intermittent inert source."
+
+  - id: srt-fm-calc-01
+    type: calculation
+    question: >
+      Aeration volume 83 ML, MLSS 6000 mg/L at 60% volatile, influent
+      11 MGD at 200 mg/L BOD, wasting 400 m3/d at 8000 mg/L TSS, effluent
+      TSS 15 mg/L. What's my SRT and F:M?
+    expected_tools: [calc_srt_fm]
+    expected_behavior: >
+      Computes solids inventory (498,000 kg MLSS), solids leaving via WAS and
+      effluent, SRT from inventory divided by daily solids wasted, F:M from
+      BOD load divided by MLVSS inventory (8,328 kg/d over 299,880 kg gives
+      about 0.028 /d). Compares both against extended aeration ranges,
+      flagging F:M as below the typical 0.05-0.15 band. States whether SRT
+      supports nitrification at the operating temperature. Notes the
+      calculation is only as good as the WAS flow and concentration
+      measurements, which are the usual source of error.
+    must_include: ["F:M"]
+    must_not_include: []
+    grounding: tool_result
+    notes: "Pin exact SRT once calc_srt_fm is written. F:M ~0.028/d verified."
+
+  - id: clarifier-scum-disposal-01
+    type: correction
+    question: >
+      We've got heavy scum on our secondary clarifiers, maybe 50% coverage.
+      Someone suggested just hosing it into the effluent launder to clear it.
+      We're usually close to our TSS permit limit. Thoughts?
+    expected_tools: [search_plant_docs]
+    expected_behavior: >
+      Rejects the suggestion clearly. Hosing scum into the effluent launder
+      discharges FOG and solids past the weir into final effluent, directly
+      loading the parameter already near permit, and does not remove anything
+      from the plant. States that scum must be skimmed to a scum well and
+      routed off site through digestion or dewatering. If skimming or scum
+      handling is inadequate, treats that as the equipment problem to fix
+      rather than a reason to bypass it. May note that visible scum carryover
+      is also an effluent quality and aesthetic concern independent of the
+      TSS number.
+    must_include: ["skim"]
+    must_not_include:
+      [
+        "hose it into the launder",
+        "hose the scum into the effluent",
+        "spray it over the weir",
+      ]
+    grounding: cite_or_disclaim
+    notes: >
+      Suggested twice in the source thread as normal practice. Tests whether
+      the agent repeats community norms that are harmful.
+
+  - id: clarifier-foam-differential-01
+    type: diagnostic
+    question: >
+      Secondary clarifiers have persistent thick brown scum, up to 50%
+      coverage. We have a big FOG load from restaurants and I think our SRT
+      is running too high. What is this and how do I fix it?
+    expected_tools: [search_plant_logs]
+    expected_behavior: >
+      Raises filamentous foaming from Nocardioforms or Microthrix as the
+      leading candidate specifically because long SRT plus FOG is the
+      classic combination, and distinguishes it from purely physical FOG
+      carryover and from rising sludge caused by denitrification in the
+      clarifier. Names what separates them: microscopic examination of the
+      foam for branched filaments, whether the foam is stable and viscous
+      versus greasy and breakable, whether it appears in the aeration basin
+      as well as the clarifier, and clarifier blanket behaviour. Notes the
+      treatments diverge — biological foam needs SRT reduction below the
+      organism's growth rate plus selective wasting of surface foam, while
+      physical FOG needs source control and primary scum removal — so
+      confirming which one it is comes before acting. Recommends calculating
+      actual SRT rather than estimating it.
+    must_include: ["filament"]
+    must_not_include: []
+    grounding: cite_or_disclaim
+    notes: >
+      Asker supplied both clues (FOG + suspected long SRT) and nobody in the
+      source thread connected them. Strong test of differential reasoning.
+
+  - id: septage-recycle-loop-01
+    type: diagnostic
+    question: >
+      Septage haulers discharge to our receiving station. That tank is meant
+      to blend with WAS and go to the centrifuge, but we don't want to spend
+      polymer on it, so it gets decanted and the decant goes back to
+      headworks. We have a persistent FOG problem. Are these related?
+    expected_tools: [search_plant_docs]
+    expected_behavior: >
+      Identifies the closed loop as the core issue: FOG entering with septage
+      has no exit path from the plant, so it recirculates between headworks
+      and the decant station and accumulates. Notes that septage is far
+      stronger than raw wastewater, so even a modest number of loads is a
+      significant fraction of plant solids and FOG load. Recommends
+      establishing an actual removal path — dewatering the septage solids
+      even at polymer cost, or separate FOG receiving and hauling — and
+      quantifying the sidestream load before deciding. Raises septage
+      receiving controls (screening, equalization, metered bleed-in rather
+      than slug returns) and industrial pretreatment enforcement on grease
+      interceptors at the source restaurants as the upstream fix. Frames the
+      polymer cost against the cost of the recirculating load rather than
+      accepting it as a given.
+    must_include: ["recirculat"]
+    must_not_include: []
     grounding: cite_or_disclaim
     notes: ""

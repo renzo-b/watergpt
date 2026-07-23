@@ -1,0 +1,129 @@
+# Maps each system prompt rule to the eval cases that fail without it, and to
+# the source thread that motivated it.
+#
+# Purpose: make every rule falsifiable. Comment out a rule, rerun the evals,
+# and if nothing goes red the rule is not doing work.
+#
+# Run check_rule_coverage.py to find rules with no tests and cases with no rule.
+
+meta:
+  version: 0.1
+  prompt_file: system_prompt.py
+
+rules:
+  - id: 1
+    name: grounding
+    summary: Plant-specific claims cite a source or are explicitly disclaimed.
+    tested_by: [dosing-runoff-01, peroxide-selenium-consequence-01,
+                septage-recycle-loop-01, sludge-blanket-rebuild-01]
+    source: baseline design decision, not thread-derived
+
+  - id: 2
+    name: no-mental-arithmetic
+    summary: Calculations go through tools; missing inputs are requested.
+    tested_by: [ct-calc-01, srt-fm-calc-01, carbon-dose-calc-01,
+                uvt-absorbance-leverage-01]
+    source: baseline design decision
+
+  - id: 3
+    name: concentration-basis
+    summary: >
+      Product vs active ingredient, w/w vs w/v. Differs by 2-5x. State the
+      basis used.
+    tested_by: [jar-test-dose-basis-01, drawdown-dose-basis-01,
+                chloride-loading-coagulant-01]
+    source: >
+      Jar test thread (operator computed 0.075 mL, correct answer 0.132 or
+      0.383 depending on basis). Drawdown thread. DAF/CIP coagulant thread.
+
+  - id: 4
+    name: insufficient-inputs
+    summary: Name what is missing; conditional rules allowed, verdicts are not.
+    tested_by: [ro-cleaning-insufficient-data-01, denitrification-carbon-need-01]
+    source: >
+      RO cleaning question with no baseline. Pulp mill denitrification
+      question with no C:N or temperature data.
+
+  - id: 5
+    name: false-premises
+    summary: Evaluate the premise before answering the question built on it.
+    tested_by: [uvt-setpoint-premise-01, orp-dewatering-mechanism-01,
+                mlss-benchmark-reframe-01]
+    source: >
+      ORP thread — accepted answer said reduced metals carry a positive charge,
+      which is wrong, and the asker thanked him. UV thread — "UVT is set to
+      65%" treats a measurement as a setpoint. MLSS thread — asked for a
+      benchmark for a dependent variable.
+
+  - id: 6
+    name: conflated-symptoms
+    summary: State whether symptoms share a cause before proposing fixes.
+    tested_by: [clarifier-coning-diagnosis-01, clarifier-foam-differential-01]
+    source: >
+      Coning thread — operator fused coning and floating sludge into one
+      theory; they are unrelated and the fixes differ.
+
+  - id: 7
+    name: diagnostic-form
+    summary: Ranked hypotheses plus the test that distinguishes them.
+    tested_by: [floc-breakup-diagnosis-01, mlvss-ratio-inerts-01,
+                clarifier-foam-differential-01, orp-dewatering-mechanism-01]
+    source: Recurring across every diagnostic thread.
+
+  - id: 8
+    name: suspicious-stability
+    summary: A flat trend is instrument failure until proven otherwise.
+    tested_by: [uv-flatline-uvt-diagnosis-01]
+    source: >
+      UV thread — UVT flat at 65% for months. Real UVT varies diurnally and
+      dips in rain events. Nobody suggested a grab-sample comparison.
+    coverage_note: >
+      Only one test. Generalizes far beyond UV (turbidimeters, chlorine
+      analyzers, DO probes). Add a second case in another domain.
+
+  - id: 9
+    name: practice-not-safety
+    summary: Widespread practice is not automatically safe or permitted.
+    tested_by: [clarifier-scum-disposal-01]
+    source: >
+      Scum thread — hosing clarifier scum into the effluent launder was
+      suggested twice as normal practice, at a plant near its TSS limit.
+    coverage_note: Only one test. High-severity rule; add a second case.
+
+  - id: 10
+    name: trace-consequences
+    summary: Check interventions against whole-plant chemistry and mass balance.
+    tested_by: [peroxide-selenium-consequence-01, septage-recycle-loop-01,
+                carbon-dose-calc-01]
+    source: >
+      Selenium thread — peroxide to hold ORP positive risks re-oxidizing
+      Se(0) and remobilizing selenium; nobody raised it. Septage thread —
+      FOG recycles with no exit path from the plant.
+
+  - id: 11
+    name: no-commercial-bias
+    summary: Cheapest first; paying the surcharge is a legitimate option.
+    tested_by: [surcharge-first-fine-01, surcharge-vs-capex-01]
+    source: >
+      Surcharge thread — participant explicitly flagged his own vendor bias
+      ("which is tough because we sell pre-treatment systems").
+
+  - id: 12
+    name: bench-testing-and-benchmarks
+    summary: >
+      Jar test rather than predict; other plants' values are not targets.
+    tested_by: [coagulant-selection-cip-01, chemical-addition-order-01,
+                jar-test-stock-prep-01, mlss-benchmark-reframe-01]
+    source: >
+      DAF/CIP thread — "no good model to predict coagulation performance from
+      analytical parameters." MLSS thread — range of 1800 to 20000 quoted.
+
+  - id: 13
+    name: safety-and-regulatory
+    summary: Flag safety, permit, and notification implications unprompted.
+    tested_by: []
+    source: baseline design decision
+    coverage_note: >
+      UNTESTED. Write a case where the correct answer must surface a
+      confined-space, lockout, or notification requirement that the question
+      did not ask about.

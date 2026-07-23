@@ -13,39 +13,24 @@ import os
 import sys
 import base64
 import mimetypes
-import os
+
 from dotenv import load_dotenv
 from anthropic import Anthropic
+from system_prompt import SYSTEM_PROMPT
 from tools import TOOL_SCHEMAS, dispatch
 
 load_dotenv()  # reads .env from cwd or walks up parent dirs
 
 API_KEY = os.getenv("ANTHROPIC_API_KEY")
+if not API_KEY:
+    raise SystemExit(
+        "ANTHROPIC_API_KEY is not set. Put it in a .env file next to this "
+        "script, or export it in your shell."
+    )
 
 # Set to whichever model you're using. Swap freely — the loop doesn't care.
 MODEL = "claude-sonnet-4-5"
 MAX_TURNS = 10  # hard stop so a confused agent can't loop forever
-
-SYSTEM_PROMPT = """You are Entroply, an assistant for licensed drinking water \
-treatment plant operators in Ontario, Canada.
-
-GROUNDING CONTRACT (non-negotiable):
-- Any claim about THIS plant (its equipment, procedures, history, past results) \
-must come from a tool result, and you must cite the document title and page.
-- If retrieval returns nothing relevant, say so plainly. Then you may offer \
-general water treatment knowledge, but label it clearly as general guidance \
-that is not from the plant's documents.
-- Never invent part numbers, dose values, valve tags, or setpoints.
-
-CALCULATIONS:
-- Never do arithmetic yourself. Use the calculator tools. If a required input \
-is missing, ask for it rather than assuming a value.
-
-TONE:
-- You are talking to a working operator, often mid-shift, sometimes at 2 AM. \
-Lead with the answer. Be concise. Flag safety and regulatory implications.
-"""
-
 
 def _image_block(path: str) -> dict:
     """Read a local image into an Anthropic image content block."""
@@ -58,7 +43,8 @@ def _image_block(path: str) -> dict:
     }
 
 
-def run_agent(question, attachment=None, plant_id="demo", verbose=True):
+def run_agent(question, attachment=None, plant_id="demo", verbose=True,
+              truncate=300):
     """Run the tool-use loop until the model stops asking for tools.
 
     Returns (final_text, tool_calls) where tool_calls is a list of
@@ -88,7 +74,7 @@ def run_agent(question, attachment=None, plant_id="demo", verbose=True):
         if verbose:
             for block in response.content:
                 if block.type == "text" and block.text.strip():
-                    print(f"\n  [assistant] {block.text.strip()[:300]}")
+                    print(f"\n  [assistant] {block.text.strip()[:truncate]}")
                 elif block.type == "tool_use":
                     print(f"  [tool call] {block.name}({block.input})")
 
@@ -112,7 +98,7 @@ def run_agent(question, attachment=None, plant_id="demo", verbose=True):
                 # often recover by fixing its arguments.
                 output, is_error = f"Tool error: {e}", True
             if verbose:
-                print(f"  [tool result] {str(output)[:300]}")
+                print(f"  [tool result] {str(output)[:truncate]}")
             results.append(
                 {
                     "type": "tool_result",
