@@ -1,0 +1,11 @@
+# Runtime dependencies for the Entroply agent.
+#   python -m venv .venv && .venv\Scripts\activate   (Windows)
+#   pip install -r requirements.txt
+#
+# Everything else the code imports (os, sys, json, re, pathlib, dataclasses,
+# typing, argparse, base64, mimetypes, math) is in the Python standard library.
+
+anthropic>=0.40      # Claude API client                 -> agent.py
+python-dotenv>=1.0   # reads ANTHROPIC_API_KEY from .env  -> agent.py
+pint>=0.24           # unit parsing & dimension checks    -> units.py
+PyYAML>=6.0          # eval sets & prompt_rules.yaml       -> run_evals.py, check_rule_coverage.py

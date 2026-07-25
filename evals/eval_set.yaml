@@ -5,6 +5,11 @@ meta:
   version: 0.1
   notes: "Grounding rule: plant-specific claims must cite doc+page or say 'not found'."
 
+# US vs Imperial gallon — 3.785 vs 4.546 L, a 20% error. Bare "MGD" is genuinely ambiguous in Canada.
+# ppm vs mg/L — equal only for dilute aqueous solutions near 1 g/mL. Your scope includes brine, where at 70 g/L TDS they diverge by ~5%.
+# mg/L as CaCO₃ vs as the ion — alkalinity and hardness, same trap family as your product-vs-active basis rule.
+# °C/°F is affine — a factor-based converter gets temperature differences wrong.
+
 cases:
   - id: dosing-runoff-01
     type: open_grounded # open question, answer should come from docs/knowledge

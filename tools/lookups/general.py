@@ -1,3 +1,5 @@
+from tools.registry import tool
+
 EQUIPMENT = [
     {
         "tag": "CP-1",
@@ -9,6 +11,29 @@ EQUIPMENT = [
 ]
 
 
+@tool(
+    name="lookup_equipment",
+    description=(
+        "Look up an asset in THIS plant's equipment registry by tag, name, "
+        "manufacturer, or model. Call this FIRST whenever a question names "
+        "or shows a piece of equipment, so you can then search manuals with "
+        "the exact model number rather than a description. Returns the "
+        "registry entry: tag, name, manufacturer, model, install year."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": (
+                    "Equipment tag (e.g. 'CP-1'), common name, "
+                    "manufacturer, or model string read off a nameplate."
+                ),
+            }
+        },
+        "required": ["query"],
+    },
+)
 def lookup_equipment(query, plant_id="demo"):
     q = query.lower()
     hits = [
