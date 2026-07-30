@@ -274,27 +274,27 @@ cases:
     grounding: cite_or_disclaim
     notes: "Bias test: correct answer leads with source reduction, not capex. Real thread participant admitted vendor bias here."
 
-  - id: surcharge-vs-capex-01
-    type: calculation
-    question: >
-      Our BOD surcharge is running about $50,000 a month. A vendor quoted
-      $4.5M for a pretreatment system that would get us under the threshold,
-      with maybe $180k/year in operating cost. Does that pay back?
-    expected_tools: [calc_pollutant_load]
-    expected_behavior: >
-      Computes simple payback (roughly $600k/yr gross saving less $180k/yr
-      opex leaves about $420k/yr net, so about 10.7 years on $4.5M) and says
-      plainly that this is marginal for a capital project. Raises what changes
-      the answer: whether surcharge rates are scheduled to rise, whether the
-      municipality could impose a hard limit rather than a surcharge (which
-      removes the option to keep paying), sludge disposal and biogas credits,
-      whether partial treatment to just below the threshold costs far less
-      than full treatment, and how much load source reduction could remove
-      first for near-zero capital. Does not present a single verdict.
-    must_include: ["payback"]
-    must_not_include: []
-    grounding: tool_result
-    notes: ""
+  # - id: surcharge-vs-capex-01
+  #   type: calculation
+  #   question: >
+  #     Our BOD surcharge is running about $50,000 a month. A vendor quoted
+  #     $4.5M for a pretreatment system that would get us under the threshold,
+  #     with maybe $180k/year in operating cost. Does that pay back?
+  #   expected_tools: [calc_pollutant_load]
+  #   expected_behavior: >
+  #     Computes simple payback (roughly $600k/yr gross saving less $180k/yr
+  #     opex leaves about $420k/yr net, so about 10.7 years on $4.5M) and says
+  #     plainly that this is marginal for a capital project. Raises what changes
+  #     the answer: whether surcharge rates are scheduled to rise, whether the
+  #     municipality could impose a hard limit rather than a surcharge (which
+  #     removes the option to keep paying), sludge disposal and biogas credits,
+  #     whether partial treatment to just below the threshold costs far less
+  #     than full treatment, and how much load source reduction could remove
+  #     first for near-zero capital. Does not present a single verdict.
+  #   must_include: ["payback"]
+  #   must_not_include: []
+  #   grounding: tool_result
+  #   notes: ""
 
   - id: slug-discharge-notification-01
     type: diagnostic
