@@ -274,3 +274,4 @@ notes to improve
 - over reaching for questions or with assumptions? liek Does that include return activated sludge in your 10 ML/d flow? If not, and you're running RAS, your actual HRT is lower — tell me your RAS flow and I'll recalculate.
 - rounding numbers in calculations
 - too much acronyms? maybe we should only acronym is the user did it first
+- scope, is SRT for activated sludge or aerobic digestor, is retention time for what system, nutrient defficient or not i.e. industiral -vs- regular wwtp.

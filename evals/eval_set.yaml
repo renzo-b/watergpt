@@ -660,22 +660,37 @@ cases:
     type: calculation
     question: >
       Aeration volume 83 ML, MLSS 6000 mg/L at 60% volatile, influent
-      11 MGD at 200 mg/L BOD, wasting 400 m3/d at 8000 mg/L TSS, effluent
-      TSS 15 mg/L. What's my SRT and F:M?
-    expected_tools: [calc_srt_fm]
+      11 MGD at 200 mg/L BOD, wasting 400 m3/d off the RAS line at
+      8000 mg/L TSS, effluent TSS 15 mg/L. What's my aerobic SRT and F:M,
+      TSS basis for the SRT?
+    # Two tools, not one. This case previously expected a `calc_srt_fm` that
+    # was never written; SRT is now calc_srt and F:M has always been its own
+    # tool. The question gained "aerobic", "off the RAS line" and "TSS basis"
+    # because calc_srt requires all three and has no defaults for them —
+    # without them the correct behaviour is to ask, which would make this a
+    # clarification case and cost rule 2 its coverage. srt-basis-clarification-01
+    # in calculation_set.yaml covers the asking behaviour instead.
+    expected_tools: [calc_srt, calc_food_to_microorganism_ratio]
     expected_behavior: >
-      Computes solids inventory (498,000 kg MLSS), solids leaving via WAS and
-      effluent, SRT from inventory divided by daily solids wasted, F:M from
-      BOD load divided by MLVSS inventory (8,328 kg/d over 299,880 kg gives
-      about 0.028 /d). Compares both against extended aeration ranges,
-      flagging F:M as below the typical 0.05-0.15 band. States whether SRT
-      supports nitrification at the operating temperature. Notes the
-      calculation is only as good as the WAS flow and concentration
+      Solids inventory 498,000 kg. Removal is 400 m3/d x 8000 mg/L = 3,200
+      kg/d of WAS plus 41,240 m3/d x 15 mg/L = 618.6 kg/d of effluent solids,
+      for 3,818.6 kg/d total, giving an aerobic SRT of 130.41 days. F:M is
+      8,327.9 kg BOD/d over 298,800 kg MLVSS (6000 x 0.60) = 0.028 /d.
+      Reports the SRT with its basis and what was in the denominator (rule
+      14). May note F:M sits below the 0.05-0.15 band the F:M tool quotes,
+      provided it presents that as a reference range and not a verdict. Must
+      NOT state whether the SRT supports nitrification — that is
+      temperature-dependent and no mixed liquor temperature was given. Notes
+      the result is only as good as the WAS flow and concentration
       measurements, which are the usual source of error.
-    must_include: ["F:M"]
+    must_include: ["F:M", "aerobic"]
     must_not_include: []
     grounding: tool_result
-    notes: "Pin exact SRT once calc_srt_fm is written. F:M ~0.028/d verified."
+    notes: >
+      SRT pinned at 130.41 d against calc_srt. Effluent flow is influent minus
+      waste (41,639.5 - 400 m3/d), which is why the effluent term is 618.6 and
+      not 624.6 kg/d. Both figures verified against the tools; F:M 0.028 /d
+      was already verified before this migration.
 
   - id: clarifier-scum-disposal-01
     type: correction
@@ -760,3 +775,46 @@ cases:
     must_not_include: []
     grounding: cite_or_disclaim
     notes: ""
+
+  - id: ph-nitrification-alkalinity-drift-01
+    type: diagnostic
+    question: >
+      We titrated back in the spring and worked out 5.2 mg/L of caustic to
+      hold pH 7.2, and it held fine for a couple of months. Same dose, same
+      flow, but now pH is sagging into the mid 6s by mid-afternoon and we're
+      chasing it. Nothing's changed on the caustic side. Do I need to redo the
+      titration?
+    # The dose is not the finding. A titration measures the buffer deficit of
+    # one grab sample at one instant; nitrification destroys alkalinity
+    # CONTINUOUSLY at 7.14 mg CaCO3 per mg NH3-N oxidized, and that demand
+    # grows as the nitrifier population and ammonia load grow through spring
+    # into summer. A fixed dose set from a spring grab sample drifts low
+    # exactly as nitrification establishes.
+    #
+    # The diurnal shape is the tell: the sag arrives mid-afternoon, following
+    # the ammonia load peak, which is a load-driven pattern rather than a
+    # chemical-supply one. Redoing the titration reproduces the same problem a
+    # few weeks later — it gives another instantaneous answer to a continuous
+    # demand.
+    expected_tools: []
+    expected_behavior: >
+      Connects the drift to ongoing alkalinity destruction by nitrification
+      rather than treating it as a stale titration, and gives the 7.14 mg
+      CaCO3 per mg NH3-N figure. Reads the mid-afternoon timing as tracking
+      the ammonia load peak. Names the measurement that distinguishes the
+      hypotheses — trending influent and effluent alkalinity alongside
+      ammonia, not just pH — per rule 7. Says that redoing the titration
+      produces another single-moment answer to a continuously growing demand,
+      so the fix is flow- or load-paced dosing with alkalinity monitored, and
+      that residual alkalinity should be kept above roughly 50-100 mg/L as
+      CaCO3 for stable nitrification rather than chasing pH directly. Should
+      not simply recompute a dose.
+    must_include: ["alkalinity", "nitrif"]
+    # Handing back another fixed number is the failure this case exists for.
+    must_not_include: ["redo the titration and"]
+    grounding: tool_result
+    notes: >
+      The section 2.5 behaviour tested end to end: calc_ph_adjustment warns on
+      every nitrifying plant that its answer is a starting point, and this
+      case checks the model acts on that rather than reciting it. Pairs with
+      ph-known-dose-volume-01, where the same warning fires on a calculation.

@@ -157,36 +157,216 @@
   notes: ""
 
 - id: mcrt-shortcut-01
-  type: calculation
+  type: clarification
   question: >
     We waste 10000 m3/d of mixed liquor straight out of the reactor, which
     holds 35000 m3. What's my MCRT?
-  expected_tools: [calc_mean_cell_residence_time]
+  # WAS a calculation case expecting calc_mean_cell_residence_time, which
+  # returned 3.50 days by the V / Q_waste short-cut. That tool is gone.
+  #
+  # The short-cut is only equal to sludge age when wasting is from the basin
+  # (so MLSS cancels) AND effluent solids are negligible. This question happens
+  # to state the first — "straight out of the reactor" — but says nothing about
+  # the second, and offers no MLSS. Answering 3.50 requires assuming the
+  # effluent carries no solids, which overstates sludge age, and the error is
+  # worst at short sludge age where this plant sits.
+  #
+  # type is `clarification`, NOT `calculation`: a calculation case with no tool
+  # call is graded as a CRITICAL failure, which is exactly backwards here.
+  expected_tools: []
   expected_answer: >
-    3.50 days — the worked example from the source text. Should carry the
-    tool's caveats that the short-cut assumes wasting from the reactor and
-    that effluent solids are excluded.
-  # "3.5" cannot be substituted here: a <=4-char phrase is matched as a
-  # word-boundary regex, and \b3\.5\b does not match inside the tool's "3.50".
-  must_include: ["3.50"]
-  must_not_include: []
+    Asks for MLSS and effluent TSS before calculating. May note that wasting
+    mixed liquor from the reactor means the waste concentration equals MLSS,
+    which is genuinely useful, but must not use that to skip the effluent term
+    and hand back 3.50 days. Should state the basis it intends to use, or ask
+    for it — system prompt rules 4 and 14.
+  must_include: ["mlss"]
+  # Both spellings, because run_evals._present treats a <=4-char phrase as a
+  # word-boundary regex: \b3\.5\b matches "3.5 days" but NOT "3.50", and
+  # \b3\.50\b matches "3.50" but not "3.5". Neither alone covers the model.
+  must_not_include: ["3.50", "3.5"]
   grounding: tool_result
-  notes: ""
+  notes: >
+    Guards the removal of calc_mean_cell_residence_time. The failure this
+    catches is the model doing 35000/10000 in its head once the short-cut tool
+    is no longer there to do it — system prompt rule 2.
 
-- id: mcrt-mass-balance-01
+# ---------------------------------------------------------------------------
+# calc_srt — activated sludge solids retention time.
+#
+# calc_srt is the ONLY tool for SRT, MCRT and sludge age; they are three names
+# for one quantity. calc_mean_cell_residence_time has been removed — it offered
+# V / Q_waste when no solids data was available, which is a convenient door
+# into the RAS-line error that trap 2 below exists to catch.
+#
+# The cases are built around the four ways this calculation goes wrong
+# silently, because the arithmetic itself is trivial and testing only the
+# arithmetic would pass while the tool returned confident wrong numbers.
+#
+# All of them share one plant so the answers can be compared directly:
+#   5000 m3 aeration at 3000 mg/L  = 15000 kg inventory
+#   200 m3/d WAS off the RAS line at 8000 mg/L = 1600 kg/d
+#   influent 10 ML/d, effluent 9800 m3/d at 15 mg/L = 147 kg/d
+#   -> aerobic SRT 15000 / 1747 = 8.59 d
+# ---------------------------------------------------------------------------
+
+- id: srt-aerobic-ras-01
   type: calculation
   question: >
-    Reactor is 5000 m3 at 3000 mg/L MLSS. We waste 200 m3/d off the RAS line
-    at 8000 mg/L, and final effluent is 10 ML/d at 15 mg/L TSS. What MCRT are
-    we running?
-  expected_tools: [calc_mean_cell_residence_time]
+    What's my aerobic SRT on a TSS basis? Aeration basins hold 5000 m3 and
+    MLSS is 3000 mg/L. We waste 200 m3/d off the RAS line, and the WAS solids
+    come back at 8000 mg/L. Influent is 10 ML/d and effluent TSS is 15 mg/L.
+  expected_tools: [calc_srt]
   expected_answer: >
-    15000 kg inventory over 1750 kg/day leaving = 8.57 days. Should note that
-    clarifier solids are excluded from the inventory.
-  must_include: ["8.57"]
+    15000 kg inventory over 1747 kg/day removed = 8.59 days. The question
+    states the basis, the waste location and the solids basis, so the model
+    should call the tool rather than asking. Should report the basis alongside
+    the number (system prompt rule 14) and should NOT declare the SRT adequate
+    or compare it to a nitrification range — the tool deliberately returns no
+    verdict.
+  # "8.59" is 4 chars, so run_evals._present matches it as \b8\.59\b. That does
+  # match the tool's "8.59 d". Do not shorten it to "8.5" — \b8\.5\b will not
+  # match inside 8.59.
+  must_include: ["8.59", "aerobic"]
+  # The two live traps for this case. 20.08 is what you get pricing the RAS
+  # waste at MLSS; 9.38 is what you get dropping effluent solids.
+  must_not_include: ["20.08", "9.38"]
+  grounding: tool_result
+  notes: >
+    NOT externally sourced. Spec section 5 asked for a worked problem from an
+    operator certification text; no such text is in this repo and inventing a
+    citation would violate system prompt rule 1. The expected answer is
+    derived from calc_srt itself and hand-checked in test_calc_srt.py, which
+    makes this a regression test, not an independent validation. Replace the
+    numbers with a cited worked example before this tool is shown to an
+    operator.
+
+- id: srt-total-basis-01
+  type: calculation
+  question: >
+    Same plant, but I want the total SRT this time — count the clarifier
+    blankets. 5000 m3 aeration at 3000 mg/L MLSS, wasting 200 m3/d off the RAS
+    at 8000 mg/L, influent 10 ML/d, effluent TSS 15 mg/L. Two clarifiers in
+    service, each 450 m2, blanket is sitting about 0.6 m deep and the blanket
+    solids run around 6000 mg/L. TSS basis throughout.
+  expected_tools: [calc_srt]
+  expected_answer: >
+    Blanket inventory 2 x 0.6 m x 450 m2 x 6000 mg/L = 3240 kg, added to the
+    15000 kg of aeration solids for 18240 kg total, over the same 1747 kg/day
+    = 10.44 days. Must carry the tool's warning that the blanket term is an
+    ESTIMATE — blanket depth is a point measurement on a surface that moves
+    with load — and must not present 10.44 as more precise than the 8.59 of
+    srt-aerobic-ras-01.
+  must_include: ["10.44", "total", "estimate"]
   must_not_include: []
   grounding: tool_result
-  notes: ""
+  notes: >
+    The same plant as srt-aerobic-ras-01 differing only in basis, and the
+    answers differ by 22%. That gap is the reason basis is a required enum
+    with no default.
+
+- id: srt-reverse-waste-rate-01
+  type: calculation
+  question: >
+    I need to get my aerobic SRT up to 10 days. Aeration is 5000 m3 at
+    3000 mg/L MLSS, RAS solids are 8000 mg/L, influent 10 ML/d, effluent TSS
+    15 mg/L, all TSS basis. How much should I be wasting off the RAS line?
+  expected_tools: [calc_srt]
+  expected_answer: >
+    169.1 m3/d, down from the 200 m3/d in srt-aerobic-ras-01 — wasting less
+    lengthens SRT, so a number above 200 is a sign error. The model must pass
+    target_srt and omit waste_flow rather than iterating forward calls or
+    doing the algebra itself.
+  # "169" is 3 chars, matched as \b169\b, which does match inside "169.1"
+  # because "." ends the word. Asserting "169.1" (5 chars) is a plain
+  # substring and would fail if the model writes "169 m3/d".
+  must_include: ["169"]
+  must_not_include: []
+  grounding: tool_result
+  notes: >
+    The operator-facing direction of this tool. Round-tripped in
+    test_calc_srt.py — feeding 169.1 m3/d back in forwards returns 10.00 d.
+
+- id: srt-mixed-units-01
+  type: calculation
+  question: >
+    Aeration volume is 5000 m3, MLSS 3000 mg/L. We're wasting 0.0528 MGD off
+    the RAS line at 8000 ppm, plant flow is 2.6417 MGD, effluent TSS 15 ppm.
+    Aerobic SRT, TSS basis?
+  expected_tools: [calc_srt]
+  expected_answer: >
+    8.59 days — the same physical plant as srt-aerobic-ras-01 with metric
+    inventory against US flows. A different answer means the model converted
+    units itself instead of passing them through, which is what units.py
+    exists to prevent. Should carry the tool's notes that MGD is assumed to be
+    US gallons and ppm is treated as mg/L.
+  must_include: ["8.59"]
+  must_not_include: []
+  grounding: tool_result
+  notes: >
+    Exercises the units.py layer across dimensions in one call: m3 of
+    inventory, MGD of flow, ppm of solids.
+
+- id: srt-basis-clarification-01
+  type: clarification
+  question: >
+    Can you work out my SRT? Aeration is 5000 m3 at 3000 mg/L MLSS, we waste
+    200 m3/d off the RAS at 8000 mg/L, influent 10 ML/d, effluent TSS 15 mg/L.
+  # Every number is present. What is missing is the BASIS — aerobic or total —
+  # and on this plant the two answers are 8.59 and 10.44 days. calc_srt has no
+  # default for it and will raise, so the right move is to ask first.
+  #
+  # type is `clarification`, NOT `calculation`: a calculation case with no tool
+  # call is graded as a CRITICAL failure, which is exactly backwards here.
+  expected_tools: []
+  expected_answer: >
+    Asks whether the operator wants the aerobic SRT (aeration basin solids
+    only) or the total SRT (including the clarifier blanket inventory), and
+    says why it matters. May calculate once they answer. Must not pick one and
+    proceed — system prompt rules 4 and 14.
+  must_include: ["aerobic"]
+  # Producing either number without asking is the failure this case exists for.
+  must_not_include: ["8.59", "10.44"]
+  grounding: tool_result
+  notes: >
+    The clarification counterpart to srt-aerobic-ras-01, which supplies the
+    basis and should therefore NOT trigger a question.
+
+- id: srt-ras-mlss-correction-01
+  type: correction
+  question: >
+    I worked out our SRT as about 20 days and I'm happy with that for
+    nitrification. Aeration 5000 m3 at 3000 mg/L MLSS, that's 15000 kg. We
+    waste 200 m3/d and I used 3000 mg/L for the waste, so 600 kg/day.
+    15000 over 600 is 25 days, call it 20 with the effluent. Sound right?
+  # Two errors, and the model must name them separately rather than just
+  # recomputing:
+  #   1. Wasting is off the RAS line, where solids are 2-4x MLSS. Using MLSS
+  #      as the waste concentration inflates SRT by the thickening factor.
+  #   2. The effluent term was hand-waved rather than computed.
+  # With the real RAS concentration the answer is 8.59 days, not 20 — and the
+  # nitrification conclusion the operator drew from 20 days does not survive.
+  expected_tools: [calc_srt]
+  expected_answer: >
+    Identifies that 3000 mg/L is the MLSS, not the WAS concentration, and that
+    wasting from the RAS line means the waste stream is 2-4x thicker — this is
+    the specific error, and it OVERSTATES SRT by roughly the thickening
+    factor. Should ask for the actual WAS/RAS solids figure rather than
+    assuming 8000 mg/L, or state the assumption clearly if it calculates.
+    Should also note the effluent term was estimated rather than computed.
+    Must NOT simply recompute and hand back a number, and must not endorse the
+    nitrification conclusion — adequacy is temperature-dependent and neither
+    the tool nor the model has the mixed liquor temperature.
+  must_include: ["ras"]
+  # "25 days" is the operator's own arithmetic on a wrong input; agreeing with
+  # it, or with the 20 they rounded to, is the failure.
+  must_not_include: ["you're right", "sounds right", "that's correct"]
+  grounding: tool_result
+  notes: >
+    The flagship trap. calc_srt returns 20.08 days if it is handed MLSS as the
+    waste concentration, and warns loudly when it does — see the RAS/MLSS
+    mismatch test in test_calc_srt.py. The warning is the safety net; this
+    case tests whether the model catches the error before relying on it.
 
 - id: slr-basic-01
   type: calculation
@@ -221,3 +401,194 @@
   must_not_include: []
   grounding: tool_result
   notes: ""
+
+# ---------------------------------------------------------------------------
+# calc_ph_adjustment — bench titration to pH-raising chemical feed rate.
+#
+# The arithmetic is a dose, a mass and a strength division. What is hard is
+# which stages run: whether the bench value is pure reagent or the delivered
+# product decides whether the commercial-strength correction applies at all,
+# and getting it backwards moves the answer by the inverse of strength — 4x on
+# 25% caustic. That is the trap these cases are built around.
+#
+# Two shared worked examples, both at 7.5 MGD (28.3906 ML/d):
+#   caustic  6.5 mL of 0.02 N NaOH into 1000 mL = 5.2 mg/L
+#            -> 147.63 kg/d pure (325.5 lb/d)
+#            -> 590.52 kg/d of 25% product (1301.9 lb/d) = 461.3 L/d at 1.28 kg/L
+#   lime     4.4 mg weighed into 1000 mL = 4.4 mg/L
+#            -> 124.92 kg/d as delivered (275.4 lb/d), no strength correction
+#
+# NOTE ON THE SPEC FIGURES: section 5 quotes 148 and 592 kg/d for caustic and
+# 125 kg/d for lime. Those are the source rounded values; 147.63, 590.52 and
+# 124.92 are what the arithmetic gives, and the pound figures agree to within a
+# rounding step either way. The tool values are pinned here, hand-checked and
+# asserted in test_calc_ph_adjustment.py.
+# ---------------------------------------------------------------------------
+
+- id: ph-caustic-volumetric-01
+  type: calculation
+  question: >
+    We titrated a mixed liquor sample to pH 7.2 and it took 6.5 mL of 0.02 N
+    caustic in a 1000 mL sample. Plant flow is 7.5 MGD, we feed 25% caustic at
+    1.28 kg/L, and we dose into the mixed liquor. We are not nitrifying. How
+    much do I need to feed?
+  expected_tools: [calc_ph_adjustment]
+  expected_answer: >
+    5.2 mg/L as pure NaOH; 147.63 kg/d of pure reagent; 590.52 kg/d of 25%
+    product, which at 1.28 kg/L is 461.3 L/d or 19.22 L/h flow-paced across
+    24 hours. A standardized titrant measures PURE reagent, so the strength
+    correction applies. Must report the basis and the strength used (rule 15),
+    and must carry the starting-point caveat and the caustic hazard note.
+  must_include: ["5.2", "590", "461"]
+  # Targeted, NOT a blanket "m3/d" ban: the model may legitimately restate
+  # 7.5 MGD as 28,391 m3/d, and that would false-positive. What must never
+  # appear is the product MASS wearing a volume unit.
+  must_not_include: ["590 m3", "590.52 m3", "591 m3"]
+  grounding: tool_result
+  notes: >
+    Spec section 5 quotes 148 and 592 kg/d; those are the source rounded
+    figures. 147.63 and 590.52 are the arithmetic, verified by hand and in
+    test_calc_ph_adjustment.py.
+
+- id: ph-lime-gravimetric-01
+  type: calculation
+  question: >
+    Bench test on primary effluent: we weighed out our hydrated lime, the same
+    stuff we feed, and it took 4.4 mg in a 1000 mL sample to bring it to
+    pH 7.0, which is where we want it. Flow is 7.5 MGD and we dose the primary
+    effluent. No nitrification here. What is the feed rate?
+  expected_tools: [calc_ph_adjustment]
+  expected_answer: >
+    4.4 mg/L, giving 124.92 kg/d (275.4 lb/d) of lime AS DELIVERED. No
+    strength correction — the operator weighed the actual product they feed,
+    so its purity is already in the number. No volumetric feed rate, because
+    no solution density was given; the answer is a mass only and should say
+    so. Must state the as-delivered basis explicitly (rule 15).
+  must_include: ["4.4", "124", "as-delivered"]
+  # Applying a purity correction anyway, at a typical 93%, gives 134.3 kg/d.
+  must_not_include: ["134"]
+  grounding: tool_result
+  notes: >
+    The counterpart to ph-caustic-volumetric-01: same tool, same plant flow,
+    opposite titrant basis, and stage 3 does not run.
+
+- id: ph-double-count-correction-01
+  type: correction
+  question: >
+    I did the lime bench test, weighed out 4.4 mg of our own hydrated lime
+    into a 1000 mL sample, so 4.4 mg/L, and at 7.5 MGD that is about 125 kg/d.
+    Now our lime is only 93% pure, so I need to divide by 0.93 and feed
+    134 kg/d. Can you confirm?
+  # The operator weighed THE PRODUCT THEY FEED. Its purity is already inside
+  # the measured mass — that is what as-delivered means. Dividing by 0.93
+  # counts the purity twice and overfeeds by about 7.5%.
+  #
+  # calc_ph_adjustment refuses this combination outright rather than computing
+  # it, so a tool call using the operator framing will error with a message
+  # naming the double-count. The model should ideally catch it first.
+  expected_tools: []
+  expected_answer: >
+    Identifies the double-count: the 4.4 mg was weighed from the delivered
+    product, so the 93% purity is already reflected in it and applying it
+    again overstates the feed by about 7.5%. The correct figure is 124.92 kg/d
+    as delivered. A purity correction would only apply if the bench value had
+    been pure Ca(OH)2, for example from a standardized titrant.
+  must_include: ["124", "already"]
+  # Deliberately empty. A correct answer QUOTES 134 kg/d in order to reject it
+  # ("134 kg/d double-counts the purity"), so banning that substring would
+  # grade the right answer as a failure. Same negation problem as the
+  # thousands-separator trap noted on sludge-quantity-01. Judge this one by
+  # reading expected_answer.
+  must_not_include: []
+  grounding: tool_result
+  notes: >
+    calc_ph_adjustment raises when titrant_basis is as_delivered_product and
+    product_strength_percent is supplied, and the message names the
+    double-count and its size — see test_calc_ph_adjustment.py. expected_tools
+    is empty because catching this before calling is the better behaviour, but
+    a call that errors and is then explained is also acceptable.
+
+- id: ph-mass-volume-correction-01
+  type: correction
+  question: >
+    Our caustic calc came out at 590 m3/d of 25% solution for the 5.2 mg/L
+    dose at 7.5 MGD. That seems like a lot of caustic, we only have a 5 m3 day
+    tank. Is our tank undersized?
+  # 590 is a MASS in kg/d, not a volume. The source material this calculation
+  # comes from mislabels the metric column m3/d and carries it through. The
+  # real volume at 1.28 kg/L is 461.3 L/d, i.e. 0.46 m3/d, so the 5 m3 tank
+  # holds about ten days rather than eight minutes.
+  #
+  # The premise (is the tank undersized) is built on the units error, so
+  # rule 5 applies as much as rule 15: evaluate the premise first.
+  expected_tools: []
+  expected_answer: >
+    Identifies that 590 is kg/d, a mass, not m3/d. At a solution density of
+    about 1.28 kg/L the actual volume is roughly 461 L/d, i.e. 0.46 m3/d, so a
+    5 m3 day tank holds around ten days and is not undersized. Should ask for
+    the solution density rather than assuming one if it is going to convert —
+    density moves with strength and temperature.
+  # 461 is the real volume in L/d; reaching it means the mass/volume error was
+  # caught. "0.46" is not asserted because the model may stay in L/d.
+  must_include: ["kg", "461"]
+  # Deliberately empty: the correct answer contains "not undersized", so
+  # banning "undersized" would fail it. Negation is invisible to a substring
+  # grader — judge this one by reading expected_answer.
+  must_not_include: []
+  grounding: tool_result
+  notes: >
+    The propagated unit-label error the tool exists to prevent. Mistaking
+    590 kg/d for 590 m3/d is off by about 1280x.
+
+- id: ph-titrant-basis-clarification-01
+  type: clarification
+  question: >
+    We titrated to pH 7.2 and used 6.5 mL of caustic on a 1000 mL sample.
+    Flow is 7.5 MGD. What do I set the feeder to?
+  # Two things are missing and both change the answer:
+  #   1. Whether the 6.5 mL was a standardized titrant of known normality
+  #      (pure reagent, strength correction applies) or the 25% product off
+  #      the delivery tank (as delivered, it does not). Those are 4x apart.
+  #   2. The normality, without which the volumetric path has no dose at all.
+  # calc_ph_adjustment has no default for titrant_basis and will raise.
+  #
+  # type is `clarification`, NOT `calculation`: a calculation case with no tool
+  # call is graded as a CRITICAL failure, which is exactly backwards here.
+  expected_tools: []
+  expected_answer: >
+    Asks whether the 6.5 mL was a standardized caustic solution of known
+    normality or the actual product the plant feeds, and says why it matters —
+    the commercial strength correction applies to one and not the other, a
+    factor of four on 25% caustic. Should also ask for the normality. Must not
+    assume a basis or a normality and produce a number.
+  must_include: ["normality"]
+  # 5.2 mg/L presumes 0.02 N; any feed rate presumes a basis.
+  must_not_include: ["5.2", "590"]
+  grounding: tool_result
+  notes: >
+    The clarification counterpart to ph-caustic-volumetric-01, which supplies
+    both and should therefore NOT trigger a question.
+
+- id: ph-known-dose-volume-01
+  type: calculation
+  question: >
+    We already know from last year we need about 12 mg/L of caustic as NaOH.
+    Flow is 3.2 MGD, the delivered product is 25% at 1.28 kg/L, and we dose
+    into the aeration basin where we sampled. We do nitrify. What is the pump
+    setting, target pH 7.0?
+  # from_known_dose: stage 1 is skipped, stages 2 and 3 run unchanged, and the
+  # density turns the mass into the volumetric rate a pump is actually set to.
+  expected_tools: [calc_ph_adjustment]
+  expected_answer: >
+    145.36 kg/d of pure NaOH, 581.44 kg/d of 25% product, 454.3 L/d at
+    1.28 kg/L, i.e. 18.93 L/h flow-paced across 24 hours. Because the plant
+    nitrifies, must carry the warning that alkalinity is destroyed
+    continuously at 7.14 mg CaCO3 per mg NH3-N oxidized, so a
+    titration-derived dose drifts low and alkalinity should be trended rather
+    than dosed once.
+  must_include: ["454", "18.9", "nitrif"]
+  must_not_include: []
+  grounding: tool_result
+  notes: >
+    Exercises the density path and the from_known_dose branch together. The
+    hourly rate matters: feeders are set in rate units, not per day.

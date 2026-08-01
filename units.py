@@ -68,6 +68,10 @@ AMBIGUITY_NOTES = {
         "density ratio — state TDS or density if precision matters."
     ),
     "ppb": "ppb treated as ug/L; same dilute-solution assumption as ppm.",
+    "lb/gal": (
+        "lb/gal assumed to be pounds per US gallon. Imperial gallons give a "
+        "density 20% higher for the same number."
+    ),
 }
 
 # ---------------------------------------------------------------------------
@@ -109,6 +113,19 @@ DIMENSIONS = {
         "canonical": "kg",
         "accepted": ["kg", "g", "lb", "tonne", "ton"],
     },
+    # Density of a chemical solution, for converting a mass feed rate to the
+    # volume a pump is actually set to.
+    #
+    # WARNING for callers: density and concentration have the SAME
+    # dimensionality (mass/volume), so parse() CANNOT tell them apart — a dose
+    # in mg/L is accepted here, and a density in kg/L is accepted as a
+    # concentration. The dimension check that catches a swapped flow/volume
+    # does not protect this pair. A tool taking both must range-check the
+    # density itself; see calc_ph_adjustment.
+    "density": {
+        "canonical": "kg/L",
+        "accepted": ["kg/L", "g/mL", "g/cm3", "kg/m3", "lb/gal", "lb/ft3"],
+    },
     "mass_rate": {
         "canonical": "kg/d",
         "accepted": ["kg/d", "lb/d", "kg/h", "tonne/d"],
@@ -146,6 +163,8 @@ ALIASES = {
     "mg/L": "milligram/liter", "ug/L": "microgram/liter",
     "mL/L": "milliliter/liter", "L/L": "liter/liter", "L/m3": "liter/m**3",
     "ml/L": "milliliter/liter", "mL/l": "milliliter/liter",
+    "kg/L": "kg/liter", "g/mL": "gram/milliliter", "g/cm3": "gram/cm**3",
+    "lb/gal": "pound/US_liquid_gallon", "lb/ft3": "pound/foot**3",
     "g/L": "gram/liter", "kg/d": "kg/day", "lb/d": "pound/day",
     "kg/h": "kg/hour", "tonne/d": "tonne/day",
     "ppm": "milligram/liter", "ppb": "microgram/liter",
@@ -321,6 +340,10 @@ if __name__ == "__main__":
     close(parse({"value": 20, "unit": "%"}, "volume_ratio").canonical, 200.0)
     close(parse({"value": 1, "unit": "L/L"}, "volume_ratio").canonical, 1000.0)
     close(parse({"value": 1000, "unit": "lb/d"}, "mass_rate").canonical, 453.59)
+    close(parse({"value": 1.28, "unit": "kg/L"}, "density").canonical, 1.28)
+    close(parse({"value": 1.28, "unit": "g/mL"}, "density").canonical, 1.28)
+    close(parse({"value": 1280, "unit": "kg/m3"}, "density").canonical, 1.28)
+    close(parse({"value": 10.68, "unit": "lb/gal"}, "density").canonical, 1.2799)
     close(parse({"value": 14.5038, "unit": "psi"}, "pressure").canonical, 1.0)
     print("known-value tests passed")
 
@@ -346,13 +369,24 @@ if __name__ == "__main__":
                      # substitute for each other in either direction.
                      ({"value": 1, "unit": "mg/L"}, "volume_ratio"),
                      ({"value": 1, "unit": "mL/L"}, "concentration"),
-                     ({"value": 1, "unit": "kg"}, "concentration")]:
+                     ({"value": 1, "unit": "kg"}, "concentration"),
+                     ({"value": 1, "unit": "kg/L"}, "flow"),
+                     ({"value": 1, "unit": "L/s"}, "density")]:
         try:
             parse(bad, dim)
             raise AssertionError(f"expected UnitError for {bad} as {dim}")
         except UnitError:
             pass
     print("dimension-mismatch tests passed")
+
+    # Density and concentration are BOTH mass/volume, so parse() cannot tell
+    # them apart and a swapped pair sails through. This is asserted rather than
+    # fixed: the dimensions really are the same, and pretending otherwise would
+    # break g/L, which is a legitimate spelling of either. Tools taking both
+    # must range-check the density — see calc_ph_adjustment.
+    assert parse({"value": 5.2, "unit": "mg/L"}, "density").canonical == 5.2e-6
+    assert parse({"value": 1.28, "unit": "kg/L"}, "concentration").canonical == 1.28e6
+    print("density/concentration overlap is real and documented, not a bug")
 
     # Bare numbers and junk must raise with an actionable message
     for bad in (45, "45 L/s", {"value": 45}, {"value": "abc", "unit": "L/s"}):

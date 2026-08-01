@@ -20,16 +20,30 @@ import yaml
 
 ROOT = pathlib.Path(__file__).parent
 RULES = ROOT / "prompt_rules.yaml"
-CASES = ROOT / "evals" / "eval_set.yaml"
+# Every eval set, not just the main one. A rule whose cases live in
+# calculation_set.yaml is still tested; reading one file only reported those
+# references as dead and hid the rule's real coverage.
+CASE_FILES = sorted((ROOT / "evals").glob("*.yaml"))
 
 GREEN, RED, YELLOW, DIM, RESET = (
     "\033[32m", "\033[31m", "\033[33m", "\033[2m", "\033[0m"
 )
 
 
+def load_cases(path):
+    """Read one eval file. Both shapes are in use across evals/ — eval_set.yaml
+    is a mapping with a 'cases:' key, calculation_set.yaml a bare list."""
+    spec = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if isinstance(spec, list):
+        return spec
+    if isinstance(spec, dict) and isinstance(spec.get("cases"), list):
+        return spec["cases"]
+    return []
+
+
 def main():
     rules = yaml.safe_load(RULES.read_text(encoding="utf-8"))["rules"]
-    cases = yaml.safe_load(CASES.read_text(encoding="utf-8"))["cases"]
+    cases = [c for path in CASE_FILES for c in load_cases(path)]
 
     case_ids = {c["id"] for c in cases}
     covered = set()

@@ -17,7 +17,7 @@ from tools.calculators.calc_ct import calc_ct
 from tools.calculators.calc_food_to_microorganism_ratio import LB_PER_KG
 from tools.calculators.calc_solids_loading_rate import LB_FT2_PER_KG_M2
 from tools.calculators.calc_surface_overflow_rate import GPD_FT2_PER_M_PER_D
-from tools.registry import ToolResult, dispatch
+from tools.registry import ToolResult, all_schemas, dispatch
 
 KNOWN_CASE = dict(
     volume={"value": 150, "unit": "m3"},
@@ -102,6 +102,25 @@ CALCULATOR_CASES = {
         "solution_strength_pct": 12.5,
         "solution_sg": 1.15,
     },
+    # Behaviour is covered in test_calc_ph_adjustment.py; this entry keeps it
+    # in the shared schema-conformance loop with every other calculator.
+    "calc_ph_adjustment": {
+        "reagent": "caustic_soda",
+        "input_mode": "from_titration",
+        "titrant_basis": "pure_reagent",
+        "bench_method": "volumetric",
+        "titrant_volume": {"value": 6.5, "unit": "mL"},
+        "titrant_normality": 0.02,
+        "sample_volume": {"value": 1000, "unit": "mL"},
+        "plant_flow": {"value": 7.5, "unit": "MGD"},
+        "product_strength_percent": 25,
+        "solution_density": {"value": 1.28, "unit": "kg/L"},
+        "endpoint_ph": 7.2,
+        "target_ph": 7.2,
+        "plant_nitrifies": False,
+        "sample_source": "mixed liquor",
+        "dosing_point": "mixed liquor",
+    },
     "calc_surface_overflow_rate": {
         "flow": {"value": 45, "unit": "L/s"},
         "area": {"value": 707, "unit": "m2"},
@@ -123,9 +142,18 @@ CALCULATOR_CASES = {
         "reactor_volume": {"value": 3000, "unit": "m3"},
         "mlvss": {"value": 2500, "unit": "mg/L"},
     },
-    "calc_mean_cell_residence_time": {
-        "reactor_volume": {"value": 35000, "unit": "m3"},
-        "waste_flow": {"value": 10000, "unit": "m3/d"},
+    # Behaviour is covered in test_calc_srt.py; this entry keeps it in the
+    # shared schema-conformance loop with every other calculator.
+    "calc_srt": {
+        "basis": "aerobic",
+        "waste_location": "ras_line",
+        "solids_basis": "TSS",
+        "aeration_volume": {"value": 5000, "unit": "m3"},
+        "mlss": {"value": 3000, "unit": "mg/L"},
+        "waste_flow": {"value": 200, "unit": "m3/d"},
+        "waste_solids": {"value": 8000, "unit": "mg/L"},
+        "influent_flow": {"value": 10, "unit": "MLD"},
+        "effluent_solids": {"value": 15, "unit": "mg/L"},
     },
     "calc_solids_loading_rate": {
         "wastewater_flow": {"value": 10000, "unit": "m3/d"},
@@ -345,74 +373,67 @@ except ValueError as e:
     assert "MLVSS must be positive" in str(e), e
 print("F:M correct, unit-system independent, zero-MLVSS guarded")
 
-# 15. MCRT. The short-cut form is the worked example from the source text:
-#     10 000 m3/d wasted from a 35 000 m3 reactor is 3.5 days.
-mcrt = dispatch("calc_mean_cell_residence_time",
-                CALCULATOR_CASES["calc_mean_cell_residence_time"])
-assert mcrt.trace["result"]["mcrt_days"] == 3.5, mcrt.trace["result"]
-assert mcrt.trace["result"]["method"].startswith("short-cut")
-assert mcrt.trace["result"]["solids_inventory_kg"] is None
-assert len(mcrt.trace["caveats"]) == 2, mcrt.trace["caveats"]
-
-# The short-cut is the mass balance with waste SS = MLSS and no effluent
-# solids, so the two must agree exactly — and for ANY MLSS, since it cancels.
-for any_mlss in (1500, 3000, 4500):
-    full = dispatch("calc_mean_cell_residence_time", {
+# 15. Sludge age. calc_mean_cell_residence_time is GONE — SRT, MCRT and sludge
+#     age are one quantity, and calc_srt is the only tool that computes it.
+#
+#     The removed tool offered V / Q_waste for when no solids data was
+#     available. That identity holds only when wasting is from the aeration
+#     basin (MLSS cancels) and effluent solids are negligible; off the RAS line
+#     it overstates sludge age by the thickening factor. It was a convenient
+#     door into the exact error calc_srt exists to catch.
+assert not any(s["name"] == "calc_mean_cell_residence_time" for s in all_schemas())
+try:
+    dispatch("calc_mean_cell_residence_time", {
         "reactor_volume": {"value": 35000, "unit": "m3"},
         "waste_flow": {"value": 10000, "unit": "m3/d"},
-        "mlss": {"value": any_mlss, "unit": "mg/L"},
     })
-    assert full.trace["result"]["mcrt_days"] == 3.5, (any_mlss, full.trace["result"])
-    assert full.trace["result"]["method"] == "mass balance"
+    raise AssertionError("calc_mean_cell_residence_time must no longer exist")
+except ValueError as e:
+    assert "unknown tool" in str(e), e
 
-# Full mass balance with RAS-line wasting and effluent solids counted:
-# 5000 m3 x 3000 mg/L = 15000 kg over (200 x 8000 + 10000 x 15)/1000 = 1750 kg/d.
-full = dispatch("calc_mean_cell_residence_time", {
-    "reactor_volume": {"value": 5000, "unit": "m3"},
-    "waste_flow": {"value": 200, "unit": "m3/d"},
-    "mlss": {"value": 3000, "unit": "mg/L"},
-    "waste_ss": {"value": 8000, "unit": "mg/L"},
-    "effluent_flow": {"value": 10, "unit": "MLD"},
-    "effluent_ss": {"value": 15, "unit": "mg/L"},
-})
-fm_r = full.trace["result"]
-assert fm_r["solids_inventory_kg"] == 15000.0, fm_r
-assert fm_r["solids_leaving_kg_per_day"] == 1750.0, fm_r
-assert fm_r["mcrt_days"] == 8.57, fm_r
-# Supplying both waste SS and effluent leaves only the clarifier-solids caveat.
-assert len(full.trace["caveats"]) == 1, full.trace["caveats"]
-assert "Clarifier solids" in full.trace["caveats"][0]
+# calc_srt owns the vocabulary, so the model has somewhere to go.
+srt_desc = next(s for s in all_schemas() if s["name"] == "calc_srt")["description"]
+for term in ("MCRT", "mean cell residence time", "sludge age"):
+    assert term in srt_desc, term
 
-# Clarifier solids, when given, raise the inventory and lengthen MCRT.
-with_clar = dispatch("calc_mean_cell_residence_time", {
-    "reactor_volume": {"value": 5000, "unit": "m3"},
-    "waste_flow": {"value": 200, "unit": "m3/d"},
-    "mlss": {"value": 3000, "unit": "mg/L"},
-    "waste_ss": {"value": 8000, "unit": "mg/L"},
-    "effluent_flow": {"value": 10, "unit": "MLD"},
-    "effluent_ss": {"value": 15, "unit": "mg/L"},
-    "clarifier_solids": {"value": 2000, "unit": "kg"},
-})
-assert with_clar.trace["result"]["solids_inventory_kg"] == 17000.0
-assert with_clar.trace["result"]["mcrt_days"] > fm_r["mcrt_days"]
-assert with_clar.trace["caveats"] == [], with_clar.trace["caveats"]
+# Asking for sludge age without MLSS is the removed tool's use case arriving at
+# calc_srt's door. It must name what is missing and why no approximation is
+# offered, rather than reporting an unknown count nobody can act on.
+try:
+    dispatch("calc_srt", {
+        "basis": "aerobic", "waste_location": "aeration_basin",
+        "solids_basis": "TSS",
+        "aeration_volume": {"value": 35000, "unit": "m3"},
+        "waste_flow": {"value": 10000, "unit": "m3/d"},
+        "influent_flow": {"value": 30000, "unit": "m3/d"},
+        "effluent_solids": {"value": 0, "unit": "mg/L"},
+    })
+    raise AssertionError("SRT without MLSS must raise")
+except ValueError as e:
+    assert "MLSS was not supplied" in str(e), e
+    assert "Ask the operator" in str(e), e
+    assert "no short-cut" in str(e), e
+    # And it must not hand back the V/Q number it just declined to compute.
+    assert "3.5" not in str(e), e
 
-# Waste SS without MLSS cannot form an inventory; effluent needs both halves.
-for bad, msg in [
-    ({"reactor_volume": {"value": 5000, "unit": "m3"},
-      "waste_flow": {"value": 200, "unit": "m3/d"},
-      "waste_ss": {"value": 8000, "unit": "mg/L"}}, "without MLSS"),
-    ({"reactor_volume": {"value": 5000, "unit": "m3"},
-      "waste_flow": {"value": 200, "unit": "m3/d"},
-      "mlss": {"value": 3000, "unit": "mg/L"},
-      "effluent_flow": {"value": 10, "unit": "MLD"}}, "must be given together"),
-]:
-    try:
-        dispatch("calc_mean_cell_residence_time", bad)
-        raise AssertionError(f"expected a ValueError for {msg}")
-    except ValueError as e:
-        assert msg in str(e), e
-print("MCRT matches the source example; short-cut and mass balance agree")
+# The arithmetic the short-cut relied on is still correct, and calc_srt
+# reproduces it exactly on the settings where the identity actually holds —
+# basin wasting, zero effluent solids — at ANY MLSS, since it cancels. This is
+# what was lost as a tool and kept as a property.
+for any_mlss in (1500, 3000, 4500):
+    equiv = dispatch("calc_srt", {
+        "basis": "aerobic",
+        "waste_location": "aeration_basin",
+        "solids_basis": "TSS",
+        "aeration_volume": {"value": 35000, "unit": "m3"},
+        "mlss": {"value": any_mlss, "unit": "mg/L"},
+        "waste_flow": {"value": 10000, "unit": "m3/d"},
+        "influent_flow": {"value": 30000, "unit": "m3/d"},
+        "effluent_solids": {"value": 0, "unit": "mg/L"},
+    })
+    assert equiv.trace["result"]["srt_days"] == 3.5, (any_mlss, equiv.trace["result"])
+print("calc_mean_cell_residence_time removed; calc_srt owns sludge age and "
+      "asks for MLSS rather than approximating")
 
 # 16. SLR = (Q_WW + Q_RAS) x MLSS / area.
 #     15000 m3/d x 3000 mg/L = 45000 kg/d over 1500 m2 = 30.00 kg/m2/d.

@@ -127,3 +127,46 @@ rules:
       UNTESTED. Write a case where the correct answer must surface a
       confined-space, lockout, or notification requirement that the question
       did not ask about.
+
+  - id: 14
+    name: srt-basis
+    summary: >
+      SRT is never a bare number. State the basis (aerobic or total) and what
+      went into the denominator; ask when the basis is unstated; never judge
+      nitrification adequacy without mixed liquor temperature.
+    tested_by: [srt-aerobic-ras-01, srt-total-basis-01,
+                srt-basis-clarification-01, srt-ras-mlss-correction-01]
+    source: >
+      calc_srt build spec, sections 2 and 6. Aerobic and total SRT differ by
+      22% on the reference plant in evals/calculation_set.yaml (8.59 vs 10.44
+      days), and pricing RAS-line wasting at MLSS returns 20.08 days against a
+      true 8.59 — a 2.3x error that reads as a healthy sludge age. Both are
+      invisible in the number, which is why the rule is about what must be
+      SAID rather than about the arithmetic.
+    coverage_note: >
+      The four cases live in evals/calculation_set.yaml, not eval_set.yaml.
+      check_rule_coverage.py reads both.
+
+  - id: 15
+    name: ph-dose-basis
+    summary: >
+      A pH-adjustment dose states its reagent basis (pure vs as-delivered),
+      the commercial strength applied, and that it is a titration-derived
+      starting point. Mass is never reported as volume without a density.
+    tested_by: [ph-caustic-volumetric-01, ph-lime-gravimetric-01,
+                ph-double-count-correction-01, ph-mass-volume-correction-01,
+                ph-titrant-basis-clarification-01,
+                ph-nitrification-alkalinity-drift-01]
+    source: >
+      calc_ph_adjustment build spec, sections 2 and 6. The source material
+      that spec derives from carries two real errors: it labels the metric
+      feed rate m3/d when the quantity is kg/d and propagates that through the
+      commercial-strength step, and it applies no purity correction at all to
+      the lime example. Pure versus as-delivered is worth a factor of four on
+      25% caustic and is invisible in the answer. Closely related to rule 3,
+      which covers the same product-versus-active-ingredient trap for dosing
+      generally; this rule is the pH-specific case plus the mass/volume and
+      starting-point requirements.
+    coverage_note: >
+      Five cases in evals/calculation_set.yaml and the diagnostic in
+      eval_set.yaml. check_rule_coverage.py reads both.
