@@ -35,3 +35,9 @@ See calc_ct.py for the reference implementation.
 from .calc_ct import *
 from .calc_chemical_feed import *
 from .calc_surface_overflow_rate import *
+from .calc_hydraulic_retention_time import *
+from .calc_sludge_quantity import *
+from .calc_food_to_microorganism_ratio import *
+from .calc_mean_cell_residence_time import *
+from .calc_solids_loading_rate import *
+from .calc_svi import *

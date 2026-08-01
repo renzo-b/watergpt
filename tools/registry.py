@@ -49,6 +49,24 @@ def tool(name, description, input_schema, wants_plant_id=False):
 
     def register(fn):
         if name in _TOOLS:
+            # Running a tool file as a script (python -m tools.calculators.calc_ct)
+            # imports its module twice: once as tools.calculators.calc_ct, when
+            # tools/__init__ pulls in the sub-packages, and again as __main__.
+            # That is the same function twice, not a name collision, so let the
+            # __main__ copy through — the decorator returns fn either way, so the
+            # demo block runs, and the registry keeps the importable copy.
+            #
+            # Matched on source file and qualname rather than just __module__:
+            # a genuinely different function that happens to be defined in a
+            # script must still raise, or this stops catching real collisions.
+            existing = _TOOLS[name]["fn"]
+            reimported = (
+                fn.__module__ == "__main__"
+                and fn.__qualname__ == existing.__qualname__
+                and fn.__code__.co_filename == existing.__code__.co_filename
+            )
+            if reimported:
+                return fn
             raise ValueError(f"duplicate tool name: {name!r}")
         _TOOLS[name] = {
             "schema": {

@@ -19,7 +19,7 @@ import sys
 import yaml
 
 ROOT = pathlib.Path(__file__).parent
-RULES = ROOT / "evals" / "prompt_rules.yaml"
+RULES = ROOT / "prompt_rules.yaml"
 CASES = ROOT / "evals" / "eval_set.yaml"
 
 GREEN, RED, YELLOW, DIM, RESET = (

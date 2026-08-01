@@ -1,0 +1,223 @@
+# calculation_set.yaml — focused regression set for the calculator tools.
+#
+#     python run_evals.py --file calculation_set.yaml
+#     python run_evals.py -f calculation_set.yaml --id sor-basic-01 --verbose
+#
+# A bare top-level list is fine here; run_evals.py accepts that as well as the
+# `cases:` mapping that eval_set.yaml uses.
+#
+# Watch the indentation. Every key must sit at the same level as `id`. If
+# `expected_tools` is indented under a `question: >` block it becomes part of
+# the question string, which silently disables tool grading AND feeds the
+# model the answer it was supposed to derive.
+#
+# Keep must_include to figures that come straight out of the tool, and prefer
+# the value as the tool prints it.
+
+- id: sor-basic-01
+  type: calculation
+  question: >
+    What's the SOR if my flow is 24 m3/d and my surface area is 5 m2?
+  expected_tools: [calc_surface_overflow_rate]
+  expected_answer: >
+    Surface overflow rate 4.80 m3/m2/d (= 4.80 m/d), 0.200 m/h,
+    117.8 gpd/ft2.
+  must_include: ["4.80"]
+  # "117.8" is deliberately not asserted: the model reports it as "118",
+  # rounding the tool's figure. Whether that is acceptable is a prompt
+  # decision — see system prompt rule 2, "do not round away a warning".
+  must_not_include: []
+  grounding: tool_result   # not graded yet; run_evals only implements cite_or_disclaim
+  notes: ""
+
+- id: hrt-basic-01
+  type: calculation
+  question: >
+    How long does water sit in my aeration basin? It holds 5000 m3 and
+    we're running 10 ML/d through it.
+  expected_tools: [calc_hydraulic_retention_time]
+  expected_answer: >
+    12.00 h (720 min, 0.5 d). Should note this is theoretical detention time
+    and that a real basin short-circuits.
+  must_include: ["12"]
+  must_not_include: []
+  grounding: tool_result
+  notes: ""
+
+- id: hrt-us-units-01
+  type: calculation
+  question: >
+    What's the detention time on a 1.0 MG aeration basin at 2.0 MGD?
+  expected_tools: [calc_hydraulic_retention_time]
+  expected_answer: >
+    12.00 h — the same answer as hrt-basic-01, which is the point: the model
+    must pass MG and MGD straight through rather than converting them itself.
+    Should carry the tool's note that MGD is assumed to be US gallons.
+  must_include: ["12"]
+  must_not_include: []
+  grounding: tool_result
+  notes: ""
+
+- id: sludge-quantity-01
+  type: calculation
+  question: >
+    Primary tank is taking 12 ML/d, influent SS 240 mg/L and effluent SS
+    95 mg/L. The sludge we pump is 4.5% dry solids, SG about 1.02. How much
+    sludge am I removing per day?
+  expected_tools: [calc_sludge_quantity]
+  expected_answer: >
+    145 mg/L SS removed (60.4%), 1740 kg/day dry solids, 38666.7 kg/day wet
+    sludge, 37.91 m3/day.
+  # Two grader traps informed these choices, both verified:
+  #  1. The model writes large numbers with thousands separators ("1,740"), so
+  #     asserting 1740 or 38666.7 fails on a substring match. Omitted.
+  #  2. run_evals._present treats a phrase of <=4 chars as a word-boundary
+  #     regex, so "37.9" does NOT match "37.91" — the trailing 1 kills the \b.
+  #     "37" matches whether the model prints 37.91, 37.9, or 37.
+  must_include: ["145", "37"]
+  must_not_include: []
+  grounding: tool_result
+  notes: ""
+
+- id: sludge-missing-ds-01
+  type: clarification
+  question: >
+    How much sludge is my primary making? We're at 12 ML/d, influent SS
+    240 mg/L, effluent SS 95 mg/L.
+  # Percent dry solids is missing and spans an order of magnitude between
+  # primary sludge and WAS, so calc_sludge_quantity requires it. The right
+  # behaviour is to ask, not to assume — system prompt rule 4.
+  #
+  # type is `clarification`, NOT `calculation`: a calculation case with no tool
+  # call is graded as a CRITICAL failure, which is exactly backwards here.
+  expected_tools: []
+  expected_answer: >
+    Asks for the percent dry solids of the pumped sludge before calculating.
+    May report the dry solids removed (1740 kg/day), which needs no assumption,
+    but must not invent a DS% to produce a volume.
+  must_include: ["dry solids"]
+  must_not_include: []
+  grounding: tool_result
+  notes: ""
+
+- id: fm-ratio-01
+  type: calculation
+  question: >
+    What's my F:M? Influent is 10 ML/d at 200 mg/L BOD, the aeration basins
+    hold 3000 m3 total and MLVSS is running 2500 mg/L.
+  expected_tools: [calc_food_to_microorganism_ratio]
+  expected_answer: >
+    2000 kg BOD/day over 7500 kg MLVSS = 0.267 /day. In the 0.25-0.45 /day
+    range quoted for BOD removal only, but the tool states that is a reference
+    range and not a target, and the answer should not present it as a verdict.
+  # Asserts the tool's figure exactly. If the model reports "0.27" this warns —
+  # treat that as a genuine rule-2 signal (reporting a rounded number rather
+  # than the tool's), not a bad assertion. Note "0.26" cannot be substituted:
+  # a <=4-char phrase is matched as a word-boundary regex and will not match
+  # inside "0.267".
+  must_include: ["0.267"]
+  must_not_include: []
+  grounding: tool_result
+  notes: ""
+
+- id: fm-ratio-us-units-01
+  type: calculation
+  question: >
+    Aeration basin is 0.79252 MG, flow 2.6417 MGD at 200 mg/L BOD, MLVSS
+    2500 mg/L. What F:M am I running?
+  expected_tools: [calc_food_to_microorganism_ratio]
+  expected_answer: >
+    0.267 /day — the same plant as fm-ratio-01 stated in US units. F:M is a
+    ratio of two masses, so the number is identical even though every
+    intermediate mass differs. A different answer means the model converted
+    units itself instead of passing them through.
+  must_include: ["0.267"]
+  must_not_include: []
+  grounding: tool_result
+  notes: ""
+
+- id: fm-mlss-not-mlvss-01
+  type: clarification
+  question: >
+    Can you work out my F:M? Flow is 10 ML/d at 200 mg/L BOD, basins are
+    3000 m3, and mixed liquor solids are 2500 mg/L.
+  # "mixed liquor solids" is ambiguous between MLSS and MLVSS. Volatile is
+  # typically 70-80% of total, so taking this as MLVSS when the operator meant
+  # MLSS understates F:M by that much. The right move is to ask which one.
+  #
+  # type is `clarification`, not `calculation` — asking is correct here, and a
+  # calculation case with no tool call is graded as a CRITICAL failure.
+  expected_tools: []
+  expected_answer: >
+    Asks whether 2500 mg/L is MLSS or MLVSS before calculating, and says why
+    it matters. May calculate once the operator confirms.
+  must_include: ["mlvss"]
+  must_not_include: []
+  grounding: tool_result
+  notes: ""
+
+- id: mcrt-shortcut-01
+  type: calculation
+  question: >
+    We waste 10000 m3/d of mixed liquor straight out of the reactor, which
+    holds 35000 m3. What's my MCRT?
+  expected_tools: [calc_mean_cell_residence_time]
+  expected_answer: >
+    3.50 days — the worked example from the source text. Should carry the
+    tool's caveats that the short-cut assumes wasting from the reactor and
+    that effluent solids are excluded.
+  # "3.5" cannot be substituted here: a <=4-char phrase is matched as a
+  # word-boundary regex, and \b3\.5\b does not match inside the tool's "3.50".
+  must_include: ["3.50"]
+  must_not_include: []
+  grounding: tool_result
+  notes: ""
+
+- id: mcrt-mass-balance-01
+  type: calculation
+  question: >
+    Reactor is 5000 m3 at 3000 mg/L MLSS. We waste 200 m3/d off the RAS line
+    at 8000 mg/L, and final effluent is 10 ML/d at 15 mg/L TSS. What MCRT are
+    we running?
+  expected_tools: [calc_mean_cell_residence_time]
+  expected_answer: >
+    15000 kg inventory over 1750 kg/day leaving = 8.57 days. Should note that
+    clarifier solids are excluded from the inventory.
+  must_include: ["8.57"]
+  must_not_include: []
+  grounding: tool_result
+  notes: ""
+
+- id: slr-basic-01
+  type: calculation
+  question: >
+    Secondary clarifier is 1500 m2. Wastewater flow is 10000 m3/d, RAS is
+    5000 m3/d, MLSS 3000 mg/L. What's my solids loading rate?
+  expected_tools: [calc_solids_loading_rate]
+  expected_answer: >
+    45000 kg/day over 1500 m2 = 30.00 kg/m2/day (6.14 lb/ft2/day). Should
+    mention that solids loading alone does not clear the clarifier — surface
+    overflow rate is a separate check.
+  must_include: ["30"]
+  must_not_include: []
+  grounding: tool_result
+  notes: ""
+
+- id: slr-vs-sor-01
+  type: calculation
+  question: >
+    Is my secondary clarifier overloaded? It's 1500 m2, wastewater flow
+    10000 m3/d, RAS 5000 m3/d, MLSS 3000 mg/L.
+  # "Overloaded" is ambiguous between hydraulic and solids loading, and a
+  # clarifier can pass one while failing the other. Both tools should fire.
+  # Neither tool returns a verdict — no sourced design table exists in the
+  # repo — so the answer must not declare pass/fail on its own authority.
+  expected_tools: [calc_solids_loading_rate, calc_surface_overflow_rate]
+  expected_answer: >
+    SLR 30.00 kg/m2/day and SOR 6.67 m3/m2/day, presented as two separate
+    loading checks. Should say the target values are plant- and
+    jurisdiction-specific rather than declaring the clarifier overloaded.
+  must_include: ["30", "6.67"]
+  must_not_include: []
+  grounding: tool_result
+  notes: ""

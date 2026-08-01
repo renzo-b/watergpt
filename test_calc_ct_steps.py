@@ -14,6 +14,8 @@ Plain asserts to match units.py and the calculators — this repo has no pytest.
 """
 
 from tools.calculators.calc_ct import calc_ct
+from tools.calculators.calc_food_to_microorganism_ratio import LB_PER_KG
+from tools.calculators.calc_solids_loading_rate import LB_FT2_PER_KG_M2
 from tools.calculators.calc_surface_overflow_rate import GPD_FT2_PER_M_PER_D
 from tools.registry import ToolResult, dispatch
 
@@ -103,6 +105,39 @@ CALCULATOR_CASES = {
     "calc_surface_overflow_rate": {
         "flow": {"value": 45, "unit": "L/s"},
         "area": {"value": 707, "unit": "m2"},
+    },
+    "calc_hydraulic_retention_time": {
+        "volume": {"value": 5000, "unit": "m3"},
+        "flow": {"value": 10, "unit": "MLD"},
+    },
+    "calc_sludge_quantity": {
+        "flow": {"value": 10, "unit": "MLD"},
+        "influent_ss": {"value": 220, "unit": "mg/L"},
+        "effluent_ss": {"value": 90, "unit": "mg/L"},
+        "sludge_dry_solids_pct": 4.0,
+        "sludge_sg": 1.02,
+    },
+    "calc_food_to_microorganism_ratio": {
+        "flow": {"value": 10, "unit": "MLD"},
+        "bod": {"value": 200, "unit": "mg/L"},
+        "reactor_volume": {"value": 3000, "unit": "m3"},
+        "mlvss": {"value": 2500, "unit": "mg/L"},
+    },
+    "calc_mean_cell_residence_time": {
+        "reactor_volume": {"value": 35000, "unit": "m3"},
+        "waste_flow": {"value": 10000, "unit": "m3/d"},
+    },
+    "calc_solids_loading_rate": {
+        "wastewater_flow": {"value": 10000, "unit": "m3/d"},
+        "ras_flow": {"value": 5000, "unit": "m3/d"},
+        "mlss": {"value": 3000, "unit": "mg/L"},
+        "clarifier_area": {"value": 1500, "unit": "m2"},
+    },
+    # Behaviour is covered in test_calc_svi.py; this entry keeps it in the
+    # shared schema-conformance loop with every other calculator.
+    "calc_svi": {
+        "settled_volume": {"value": 200, "unit": "mL/L"},
+        "mlss": {"value": 2500, "unit": "mg/L"},
     },
 }
 SHAPE = {"summary": str, "result": dict, "steps": list,
@@ -195,5 +230,215 @@ one = dispatch("calc_chemical_feed", {
 assert len(one.trace["caveats"]) == 1, one.trace["caveats"]
 assert "Solution strength" in one.trace["caveats"][0]
 print("chemical feed caveats fire only on assumed values")
+
+# 11. The duplicate-name guard tolerates a module imported twice (which is what
+#     `python -m tools.calculators.calc_ct` does) but still catches a real
+#     collision. The second case is the one that matters: relaxing the guard to
+#     just "defined in __main__" would let any script silently shadow a tool.
+from tools.registry import tool  # noqa: E402
+
+try:
+    @tool(name="calc_ct", description="x", input_schema={})
+    def impostor():
+        pass
+    raise AssertionError("a genuinely different function must not be allowed")
+except ValueError as e:
+    assert "duplicate tool name" in str(e), e
+
+try:
+    @tool(name="calc_ct", description="x", input_schema={})
+    def calc_ct():  # noqa: F811  — same qualname, different file
+        pass
+    raise AssertionError("same qualname from another file must not be allowed")
+except ValueError as e:
+    assert "duplicate tool name" in str(e), e
+print("duplicate-name guard still catches real collisions")
+
+# 12. HRT known value: 5000 m3 at 10 ML/d = 12 h exactly. Cross-checks against
+#     calc_ct, whose theoretical detention time is the same V/Q calculation.
+hrt = dispatch("calc_hydraulic_retention_time",
+               CALCULATOR_CASES["calc_hydraulic_retention_time"])
+assert hrt.trace["result"] == {"hrt_h": 12.0, "hrt_min": 720.0, "hrt_d": 0.5}, \
+    hrt.trace["result"]
+
+ct_detention = dispatch("calc_ct", KNOWN_CASE).trace["steps"][1]  # V / Q, minutes
+hrt_same = dispatch("calc_hydraulic_retention_time", {
+    "volume": {"value": 150, "unit": "m3"},
+    "flow": {"value": 45, "unit": "L/s"},
+})
+assert abs(hrt_same.trace["result"]["hrt_min"] - ct_detention["value"]) < 0.1, (
+    "HRT must agree with calc_ct's theoretical detention time: "
+    f"{hrt_same.trace['result']['hrt_min']} vs {ct_detention['value']}"
+)
+print("HRT known value correct and agrees with calc_ct's detention time")
+
+# 13. Sludge mass balance: 10 ML/d x (220-90) mg/L = 1300 kg/d dry solids;
+#     at 4% DS that is 32500 kg/d wet, and at SG 1.02, 31.86 m3/d.
+sl = dispatch("calc_sludge_quantity", CALCULATOR_CASES["calc_sludge_quantity"])
+r = sl.trace["result"]
+assert r["ss_removed_mgl"] == 130.0, r
+assert r["dry_solids_kg_per_day"] == 1300.0, r
+assert r["wet_sludge_kg_per_day"] == 32500.0, r
+assert r["wet_sludge_m3_per_day"] == 31.86, r
+assert r["removal_pct"] == 59.1, r
+
+# Omitting SG is allowed but caveated; mass is unaffected, volume is not.
+no_sg = dispatch("calc_sludge_quantity", {
+    k: v for k, v in CALCULATOR_CASES["calc_sludge_quantity"].items()
+    if k != "sludge_sg"
+})
+assert len(no_sg.trace["caveats"]) == 1, no_sg.trace["caveats"]
+assert "specific gravity was not given" in no_sg.trace["caveats"][0].lower()
+assert no_sg.trace["result"]["wet_sludge_kg_per_day"] == r["wet_sludge_kg_per_day"]
+assert no_sg.trace["result"]["wet_sludge_m3_per_day"] > r["wet_sludge_m3_per_day"]
+
+# Effluent SS above influent is a data error, not a negative sludge yield.
+try:
+    dispatch("calc_sludge_quantity", {
+        "flow": {"value": 10, "unit": "MLD"},
+        "influent_ss": {"value": 90, "unit": "mg/L"},
+        "effluent_ss": {"value": 220, "unit": "mg/L"},
+        "sludge_dry_solids_pct": 4.0,
+    })
+    raise AssertionError("inverted SS must raise")
+except ValueError as e:
+    assert "exceeds influent" in str(e), e
+print("sludge mass balance correct; SG caveat and inverted-SS guard both fire")
+
+# 14. F:M = (Q x BOD) / (V x MLVSS). 10 ML/d x 200 mg/L = 2000 kg BOD/d over
+#     3000 m3 x 2500 mg/L = 7500 kg MLVSS, so 0.2667 -> 0.267 /day.
+fm = dispatch("calc_food_to_microorganism_ratio",
+              CALCULATOR_CASES["calc_food_to_microorganism_ratio"])
+fr = fm.trace["result"]
+assert fr["food_kg_per_day"] == 2000.0, fr
+assert fr["mlvss_inventory_kg"] == 7500.0, fr
+assert fr["fm_ratio_per_day"] == 0.267, fr
+
+# F:M is a ratio of two masses, so it must be identical in US units even
+# though every intermediate differs. This is the property worth pinning.
+fm_us = dispatch("calc_food_to_microorganism_ratio", {
+    "flow": {"value": 2.6417, "unit": "MGD"},
+    "bod": {"value": 200, "unit": "ppm"},
+    "reactor_volume": {"value": 0.79252, "unit": "MG"},
+    "mlvss": {"value": 2500, "unit": "ppm"},
+})
+assert fm_us.trace["result"]["fm_ratio_per_day"] == fr["fm_ratio_per_day"], (
+    f"F:M must be unit-system independent: "
+    f"{fm_us.trace['result']['fm_ratio_per_day']} vs {fr['fm_ratio_per_day']}"
+)
+
+# The lb conversion must match pint, not a remembered constant.
+expected_lb = (1 * UREG("kg")).to("pound").magnitude
+assert abs(LB_PER_KG - expected_lb) < 1e-9, f"{LB_PER_KG} != pint's {expected_lb}"
+assert fr["food_lb_per_day"] == round(2000.0 * expected_lb, 1), fr
+
+# MLVSS is the denominator: zero must raise, not divide by zero.
+try:
+    dispatch("calc_food_to_microorganism_ratio", {
+        "flow": {"value": 10, "unit": "MLD"},
+        "bod": {"value": 200, "unit": "mg/L"},
+        "reactor_volume": {"value": 3000, "unit": "m3"},
+        "mlvss": {"value": 0, "unit": "mg/L"},
+    })
+    raise AssertionError("zero MLVSS must raise")
+except ValueError as e:
+    assert "MLVSS must be positive" in str(e), e
+print("F:M correct, unit-system independent, zero-MLVSS guarded")
+
+# 15. MCRT. The short-cut form is the worked example from the source text:
+#     10 000 m3/d wasted from a 35 000 m3 reactor is 3.5 days.
+mcrt = dispatch("calc_mean_cell_residence_time",
+                CALCULATOR_CASES["calc_mean_cell_residence_time"])
+assert mcrt.trace["result"]["mcrt_days"] == 3.5, mcrt.trace["result"]
+assert mcrt.trace["result"]["method"].startswith("short-cut")
+assert mcrt.trace["result"]["solids_inventory_kg"] is None
+assert len(mcrt.trace["caveats"]) == 2, mcrt.trace["caveats"]
+
+# The short-cut is the mass balance with waste SS = MLSS and no effluent
+# solids, so the two must agree exactly — and for ANY MLSS, since it cancels.
+for any_mlss in (1500, 3000, 4500):
+    full = dispatch("calc_mean_cell_residence_time", {
+        "reactor_volume": {"value": 35000, "unit": "m3"},
+        "waste_flow": {"value": 10000, "unit": "m3/d"},
+        "mlss": {"value": any_mlss, "unit": "mg/L"},
+    })
+    assert full.trace["result"]["mcrt_days"] == 3.5, (any_mlss, full.trace["result"])
+    assert full.trace["result"]["method"] == "mass balance"
+
+# Full mass balance with RAS-line wasting and effluent solids counted:
+# 5000 m3 x 3000 mg/L = 15000 kg over (200 x 8000 + 10000 x 15)/1000 = 1750 kg/d.
+full = dispatch("calc_mean_cell_residence_time", {
+    "reactor_volume": {"value": 5000, "unit": "m3"},
+    "waste_flow": {"value": 200, "unit": "m3/d"},
+    "mlss": {"value": 3000, "unit": "mg/L"},
+    "waste_ss": {"value": 8000, "unit": "mg/L"},
+    "effluent_flow": {"value": 10, "unit": "MLD"},
+    "effluent_ss": {"value": 15, "unit": "mg/L"},
+})
+fm_r = full.trace["result"]
+assert fm_r["solids_inventory_kg"] == 15000.0, fm_r
+assert fm_r["solids_leaving_kg_per_day"] == 1750.0, fm_r
+assert fm_r["mcrt_days"] == 8.57, fm_r
+# Supplying both waste SS and effluent leaves only the clarifier-solids caveat.
+assert len(full.trace["caveats"]) == 1, full.trace["caveats"]
+assert "Clarifier solids" in full.trace["caveats"][0]
+
+# Clarifier solids, when given, raise the inventory and lengthen MCRT.
+with_clar = dispatch("calc_mean_cell_residence_time", {
+    "reactor_volume": {"value": 5000, "unit": "m3"},
+    "waste_flow": {"value": 200, "unit": "m3/d"},
+    "mlss": {"value": 3000, "unit": "mg/L"},
+    "waste_ss": {"value": 8000, "unit": "mg/L"},
+    "effluent_flow": {"value": 10, "unit": "MLD"},
+    "effluent_ss": {"value": 15, "unit": "mg/L"},
+    "clarifier_solids": {"value": 2000, "unit": "kg"},
+})
+assert with_clar.trace["result"]["solids_inventory_kg"] == 17000.0
+assert with_clar.trace["result"]["mcrt_days"] > fm_r["mcrt_days"]
+assert with_clar.trace["caveats"] == [], with_clar.trace["caveats"]
+
+# Waste SS without MLSS cannot form an inventory; effluent needs both halves.
+for bad, msg in [
+    ({"reactor_volume": {"value": 5000, "unit": "m3"},
+      "waste_flow": {"value": 200, "unit": "m3/d"},
+      "waste_ss": {"value": 8000, "unit": "mg/L"}}, "without MLSS"),
+    ({"reactor_volume": {"value": 5000, "unit": "m3"},
+      "waste_flow": {"value": 200, "unit": "m3/d"},
+      "mlss": {"value": 3000, "unit": "mg/L"},
+      "effluent_flow": {"value": 10, "unit": "MLD"}}, "must be given together"),
+]:
+    try:
+        dispatch("calc_mean_cell_residence_time", bad)
+        raise AssertionError(f"expected a ValueError for {msg}")
+    except ValueError as e:
+        assert msg in str(e), e
+print("MCRT matches the source example; short-cut and mass balance agree")
+
+# 16. SLR = (Q_WW + Q_RAS) x MLSS / area.
+#     15000 m3/d x 3000 mg/L = 45000 kg/d over 1500 m2 = 30.00 kg/m2/d.
+slr = dispatch("calc_solids_loading_rate",
+               CALCULATOR_CASES["calc_solids_loading_rate"])
+sr = slr.trace["result"]
+assert sr["combined_flow_m3_per_day"] == 15000.0, sr
+assert sr["solids_load_kg_per_day"] == 45000.0, sr
+assert sr["slr_kg_m2_per_day"] == 30.0, sr
+assert sr["ras_pct_of_flow"] == 50.0, sr
+
+expected_lb_ft2 = (1 * UREG("kg/meter**2/day")).to("pound/foot**2/day").magnitude
+assert abs(LB_FT2_PER_KG_M2 - expected_lb_ft2) < 1e-12, LB_FT2_PER_KG_M2
+assert sr["slr_lb_ft2_per_day"] == round(30.0 * expected_lb_ft2, 2), sr
+
+# The source's US shortcut (MGD x mg/L x 8.34 = lb/d) agrees to within the
+# rounding of 8.34 itself — the exact factor is 8.3454, so ~0.07% apart.
+via_834 = (15000 / 3785.411784) * 3000 * 8.34 * 0.45359237
+assert abs(via_834 - sr["solids_load_kg_per_day"]) / sr["solids_load_kg_per_day"] < 0.001
+
+# RAS is included in SLR but excluded from SOR — the two must differ.
+sor = dispatch("calc_surface_overflow_rate", {
+    "flow": {"value": 10000, "unit": "m3/d"},
+    "area": {"value": 1500, "unit": "m2"},
+})
+assert sor.trace["result"]["sor_m3_m2_d"] == 6.67, sor.trace["result"]
+print("SLR correct, lb/ft2/d matches pint, agrees with the 8.34 shortcut")
 
 print("\nall tests passed")

@@ -97,6 +97,14 @@ DIMENSIONS = {
         "canonical": "mg/L",
         "accepted": ["mg/L", "g/m3", "ppm", "ppb", "ug/L", "g/L", "kg/m3"],
     },
+    # Volume of one phase per volume of sample — settled sludge volume, blanket
+    # depth as a fraction, and so on. Dimensionless, which is exactly why it
+    # cannot use the concentration dimension: mL/L is a ratio, mg/L is a mass
+    # per volume, and pint rightly refuses to interchange them.
+    "volume_ratio": {
+        "canonical": "mL/L",
+        "accepted": ["mL/L", "%", "L/L", "L/m3"],
+    },
     "mass": {
         "canonical": "kg",
         "accepted": ["kg", "g", "lb", "tonne", "ton"],
@@ -136,6 +144,8 @@ ALIASES = {
     "L/s": "liter/second", "L/h": "liter/hour", "L/min": "liter/minute",
     "L/d": "liter/day", "mL/min": "milliliter/minute",
     "mg/L": "milligram/liter", "ug/L": "microgram/liter",
+    "mL/L": "milliliter/liter", "L/L": "liter/liter", "L/m3": "liter/m**3",
+    "ml/L": "milliliter/liter", "mL/l": "milliliter/liter",
     "g/L": "gram/liter", "kg/d": "kg/day", "lb/d": "pound/day",
     "kg/h": "kg/hour", "tonne/d": "tonne/day",
     "ppm": "milligram/liter", "ppb": "microgram/liter",
@@ -307,6 +317,9 @@ if __name__ == "__main__":
     close(parse({"value": 1, "unit": "acre"}, "area").canonical, 4046.86)
     close(parse({"value": 1, "unit": "g/m3"}, "concentration").canonical, 1.0)
     close(parse({"value": 1, "unit": "g/L"}, "concentration").canonical, 1000.0)
+    close(parse({"value": 250, "unit": "mL/L"}, "volume_ratio").canonical, 250.0)
+    close(parse({"value": 20, "unit": "%"}, "volume_ratio").canonical, 200.0)
+    close(parse({"value": 1, "unit": "L/L"}, "volume_ratio").canonical, 1000.0)
     close(parse({"value": 1000, "unit": "lb/d"}, "mass_rate").canonical, 453.59)
     close(parse({"value": 14.5038, "unit": "psi"}, "pressure").canonical, 1.0)
     print("known-value tests passed")
@@ -329,6 +342,10 @@ if __name__ == "__main__":
                      ({"value": 1, "unit": "L/s"}, "volume"),
                      ({"value": 1, "unit": "m3"}, "area"),
                      ({"value": 1, "unit": "m"}, "area"),
+                     # mL/L is dimensionless, mg/L is not — they must not
+                     # substitute for each other in either direction.
+                     ({"value": 1, "unit": "mg/L"}, "volume_ratio"),
+                     ({"value": 1, "unit": "mL/L"}, "concentration"),
                      ({"value": 1, "unit": "kg"}, "concentration")]:
         try:
             parse(bad, dim)

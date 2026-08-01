@@ -29,8 +29,42 @@ import yaml
 from agent import run_agent
 
 ROOT = pathlib.Path(__file__).parent
-EVAL_FILE = ROOT / "evals" / "eval_set.yaml"
-RUNS_DIR = ROOT / "evals" / "runs"
+EVALS_DIR = ROOT / "evals"
+DEFAULT_EVAL_FILE = "eval_set.yaml"
+RUNS_DIR = EVALS_DIR / "runs"
+
+
+def resolve_eval_file(name):
+    """Accept a bare filename in evals/, or any path relative to cwd."""
+    for candidate in (EVALS_DIR / name, pathlib.Path(name)):
+        if candidate.is_file():
+            return candidate
+    available = sorted(p.name for p in EVALS_DIR.glob("*.yaml"))
+    raise SystemExit(
+        f"no eval file {name!r}. Available in evals/: {', '.join(available)}"
+    )
+
+
+def load_cases(path):
+    """Read an eval file.
+
+    Accepts either the eval_set.yaml shape, a mapping with a 'cases:' key, or a
+    bare top-level list of cases. Both are in use, and the failure mode when a
+    file uses the other shape is an unhelpful TypeError deep in main().
+    """
+    spec = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if isinstance(spec, list):
+        cases = spec
+    elif isinstance(spec, dict) and isinstance(spec.get("cases"), list):
+        cases = spec["cases"]
+    else:
+        raise SystemExit(
+            f"{path} must be a list of cases, or a mapping with a 'cases:' key."
+        )
+    missing = [c.get("id", "<no id>") for c in cases if not c.get("question")]
+    if missing:
+        raise SystemExit(f"{path}: cases with no question: {', '.join(missing)}")
+    return cases
 
 GREEN, RED, YELLOW, DIM, RESET = (
     "\033[32m",
@@ -104,6 +138,10 @@ def grade(case, answer, tool_calls):
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument(
+        "--file", "-f", default=DEFAULT_EVAL_FILE,
+        help=f"eval file: a name in evals/ or a path (default: {DEFAULT_EVAL_FILE})",
+    )
     ap.add_argument("--type", help="filter by case type")
     ap.add_argument("--id", help="run a single case id")
     ap.add_argument(
@@ -113,8 +151,9 @@ def main():
     )
     args = ap.parse_args()
 
-    spec = yaml.safe_load(EVAL_FILE.read_text())
-    cases = spec["cases"]
+    eval_file = resolve_eval_file(args.file)
+    cases = load_cases(eval_file)
+    print(f"{DIM}{eval_file.relative_to(ROOT)} — {len(cases)} cases{RESET}")
     if args.type:
         cases = [c for c in cases if c.get("type") == args.type]
     if args.id:
@@ -181,7 +220,8 @@ def main():
     )
 
     RUNS_DIR.mkdir(parents=True, exist_ok=True)
-    out = RUNS_DIR / f"{time.strftime('%Y%m%d-%H%M%S')}.json"
+    # Name the run after its set, so two sets' runs can't be confused later.
+    out = RUNS_DIR / f"{time.strftime('%Y%m%d-%H%M%S')}-{eval_file.stem}.json"
     out.write_text(json.dumps(results, indent=2))
     print(f"{DIM}saved → {out.relative_to(ROOT)}{RESET}")
 
