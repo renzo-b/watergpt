@@ -15,6 +15,26 @@ star import). You never edit this file or a central schema list again.
 _TOOLS = {}
 
 
+class ToolResult(str):
+    """A tool's summary string, with a machine-readable trace attached.
+
+    Subclassing str is the point: every existing caller — agent.py's
+    str(output), the verbose print, the eval harness — keeps seeing exactly
+    the string the tool has always returned, with no call-site changes. The
+    trace rides alongside on .trace for a UI that wants to render the working.
+
+    The model only ever sees the string. The trace is never fed back to it as
+    text, because the steps in it are Python's arithmetic, not the model's.
+    """
+
+    trace = None
+
+    def __new__(cls, summary, trace=None):
+        obj = super().__new__(cls, summary)
+        obj.trace = trace
+        return obj
+
+
 def tool(name, description, input_schema, wants_plant_id=False):
     """Register the decorated function as an agent tool.
 
@@ -50,10 +70,23 @@ def all_schemas():
 
 
 def dispatch(name, tool_input, plant_id="demo"):
-    """Look up a tool by name and call it with the model's arguments."""
+    """Look up a tool by name and call it with the model's arguments.
+
+    A tool may return either a plain string or a dict with a "summary" key
+    plus a structured trace. Either way this returns something that IS a
+    string, so the agent loop is unchanged; when there is a trace, the return
+    value is a ToolResult carrying it on .trace.
+    """
     entry = _TOOLS.get(name)
     if entry is None:
         raise ValueError(f"unknown tool: {name}")
     if entry["wants_plant_id"]:
-        return entry["fn"](plant_id=plant_id, **tool_input)
-    return entry["fn"](**tool_input)
+        out = entry["fn"](plant_id=plant_id, **tool_input)
+    else:
+        out = entry["fn"](**tool_input)
+
+    # Unwrap the trace dict to its summary. The model must never be handed the
+    # whole dict as text — it would read the steps as something to re-derive.
+    if isinstance(out, dict) and "summary" in out:
+        return ToolResult(out["summary"], trace=out)
+    return out

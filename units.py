@@ -89,6 +89,10 @@ DIMENSIONS = {
         "canonical": "m3",
         "accepted": ["m3", "L", "ML", "MG", "gal", "ft3"],
     },
+    "area": {
+        "canonical": "m2",
+        "accepted": ["m2", "ft2", "cm2", "ha", "acre"],
+    },
     "concentration": {
         "canonical": "mg/L",
         "accepted": ["mg/L", "g/m3", "ppm", "ppb", "ug/L", "g/L", "kg/m3"],
@@ -127,6 +131,8 @@ DIMENSIONS = {
 ALIASES = {
     "m3": "m**3", "m3/h": "m**3/hour", "m3/d": "m**3/day", "m3/s": "m**3/second",
     "ft3": "foot**3", "kg/m3": "kg/m**3", "g/m3": "g/m**3",
+    "m2": "m**2", "ft2": "foot**2", "cm2": "cm**2",
+    "sqft": "foot**2", "sq_ft": "foot**2", "sqm": "m**2", "ha": "hectare",
     "L/s": "liter/second", "L/h": "liter/hour", "L/min": "liter/minute",
     "L/d": "liter/day", "mL/min": "milliliter/minute",
     "mg/L": "milligram/liter", "ug/L": "microgram/liter",
@@ -294,6 +300,11 @@ if __name__ == "__main__":
     close(parse({"value": 1, "unit": "MLD"}, "flow").canonical, 11.574)
     close(parse({"value": 150, "unit": "m3"}, "volume").canonical, 150.0)
     close(parse({"value": 1, "unit": "MG"}, "volume").canonical, 3785.41)
+    close(parse({"value": 1, "unit": "m2"}, "area").canonical, 1.0)
+    close(parse({"value": 1, "unit": "ft2"}, "area").canonical, 0.092903)
+    close(parse({"value": 1, "unit": "sqft"}, "area").canonical, 0.092903)
+    close(parse({"value": 1, "unit": "ha"}, "area").canonical, 10000.0)
+    close(parse({"value": 1, "unit": "acre"}, "area").canonical, 4046.86)
     close(parse({"value": 1, "unit": "g/m3"}, "concentration").canonical, 1.0)
     close(parse({"value": 1, "unit": "g/L"}, "concentration").canonical, 1000.0)
     close(parse({"value": 1000, "unit": "lb/d"}, "mass_rate").canonical, 453.59)
@@ -316,6 +327,8 @@ if __name__ == "__main__":
     # Dimensional mismatch must raise, not compute
     for bad, dim in [({"value": 1, "unit": "m3"}, "flow"),
                      ({"value": 1, "unit": "L/s"}, "volume"),
+                     ({"value": 1, "unit": "m3"}, "area"),
+                     ({"value": 1, "unit": "m"}, "area"),
                      ({"value": 1, "unit": "kg"}, "concentration")]:
         try:
             parse(bad, dim)

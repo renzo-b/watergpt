@@ -138,7 +138,7 @@ def main():
 
         t0 = time.time()
         try:
-            answer, tool_calls = run_agent(
+            answer, tool_calls, _traces = run_agent(
                 case["question"], attachment=attachment, verbose=args.verbose
             )
             status, failures = grade(case, answer, tool_calls)

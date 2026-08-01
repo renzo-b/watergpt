@@ -20,9 +20,13 @@ Three habits to copy into every calculator:
      and assertable in an eval via must_include.
   3. Let UnitError propagate. The agent loop hands it back to the model, which
      fixes its arguments or asks the operator.
+  4. Return {"summary": <the string>, ...} and capture each intermediate as a
+     step as it is computed. The summary is what the model and the CLI see;
+     the trace is for a UI that renders the working. Never ask the model to
+     narrate the steps — model-generated arithmetic is untrusted.
 """
 
-from units import echo_all, parse, quantity_schema
+from units import echo, echo_all, parse, quantity_schema
 from tools.registry import tool
 
 # CT required (mg.min/L) for 0.5-log Giardia inactivation by free chlorine,
@@ -82,7 +86,13 @@ def _interp_ct(temp_c: float) -> float:
     },
 )
 def calc_ct(volume, flow, residual, temperature, ph, baffling_factor):
-    """CT achieved vs CT required for 0.5-log Giardia inactivation."""
+    """CT achieved vs CT required for 0.5-log Giardia inactivation.
+
+    Returns {"summary", "result", "steps", "conversions", "caveats"}. "summary"
+    is the operator-facing string, unchanged from what this returned before the
+    trace was added; everything else is the same intermediates captured as they
+    are computed, for a UI that renders an expandable "show working" panel.
+    """
     # 1. Parse first. Dimension errors surface here, before any math.
     v = parse(volume, "volume")
     q = parse(flow, "flow")
@@ -99,12 +109,66 @@ def calc_ct(volume, flow, residual, temperature, ph, baffling_factor):
             "configuration rather than assuming a value."
         )
 
+    # Each intermediate is captured as a step immediately after it is computed.
+    # Nothing below is recalculated for the trace — the step entries only
+    # round, for display, the value the next line goes on to use.
+    steps = []
+
     flow_m3_min = q.canonical * 60 / 1000          # L/s -> m3/min
+    steps.append({
+        "label": "Flow in working units",
+        "formula": "Q x 60 / 1000",
+        "substituted": f"{q.canonical:g} L/s x 60 / 1000",
+        "value": round(flow_m3_min, 2),
+        "unit": "m3/min",
+    })
+
     theoretical_min = v.canonical / flow_m3_min
+    steps.append({
+        "label": "Theoretical detention time",
+        "formula": "V / Q",
+        "substituted": f"{v.canonical:g} m3 / {flow_m3_min:.2f} m3/min",
+        "value": round(theoretical_min, 1),
+        "unit": "min",
+    })
+
     t10_min = theoretical_min * baffling_factor
+    steps.append({
+        "label": "T10 contact time",
+        "formula": "theoretical detention time x baffling factor",
+        "substituted": f"{theoretical_min:.1f} min x {baffling_factor}",
+        "value": round(t10_min, 1),
+        "unit": "min",
+    })
+
     ct_actual = c.canonical * t10_min
+    steps.append({
+        "label": "CT achieved",
+        "formula": "C x T10",
+        "substituted": f"{c.canonical:g} mg/L x {t10_min:.1f} min",
+        "value": round(ct_actual, 1),
+        "unit": "mg.min/L",
+    })
+
     ct_required = _interp_ct(t.canonical)
+    steps.append({
+        "label": "CT required (0.5-log Giardia)",
+        "formula": "interpolated from the CT table",
+        "substituted": f"table lookup at {t.canonical:.1f} degC, pH {ph}",
+        "value": round(ct_required, 1),
+        "unit": "mg.min/L",
+    })
+
     ratio = ct_actual / ct_required
+    steps.append({
+        "label": "CT ratio",
+        "formula": "CT achieved / CT required",
+        "substituted": f"{ct_actual:.1f} / {ct_required:.1f}",
+        "value": round(ratio, 2),
+        "unit": "",                                # dimensionless
+    })
+
+    verdict = "PASS" if ratio >= 1.0 else "FAIL"
 
     caveats = []
     if ph > 7.5:
@@ -123,10 +187,32 @@ def calc_ct(volume, flow, residual, temperature, ph, baffling_factor):
         f"CT achieved: {ct_actual:.1f} mg.min/L",
         f"CT required (0.5-log Giardia, {t.canonical:.1f} C, pH {ph}): "
         f"{ct_required:.1f} mg.min/L",
-        f"CT ratio: {ratio:.2f} — {'PASS' if ratio >= 1.0 else 'FAIL'}",
+        f"CT ratio: {ratio:.2f} — {verdict}",
     ]
     out += [f"CAVEAT: {c_}" for c_ in caveats]
-    return "\n".join(out)
+
+    conversions = [echo(x) for x in (v, q, c, t)]
+    conversions.append(
+        f"{q.value:g} {q.unit} = {flow_m3_min:.2f} m3/min (working units)"
+    )
+    conversions += [
+        f"NOTE: {n}"
+        for n in dict.fromkeys(n for x in (v, q, c, t) for n in x.notes)
+    ]
+
+    return {
+        # Byte-for-byte what this function returned before the trace existed.
+        "summary": "\n".join(out),
+        "result": {
+            "ct_actual": round(ct_actual, 1),
+            "ct_required": round(ct_required, 1),
+            "ct_ratio": round(ratio, 2),
+            "verdict": verdict,
+        },
+        "steps": steps,
+        "conversions": conversions,
+        "caveats": caveats,
+    }
 
 
 if __name__ == "__main__":
@@ -139,7 +225,7 @@ if __name__ == "__main__":
         residual={"value": 0.8, "unit": "mg/L"},
         temperature={"value": 5, "unit": "degC"},
         ph=7.2, baffling_factor=0.5,
-    ))
+    )["summary"])
 
     print("\n" + "=" * 68 + "\n")
 
@@ -150,7 +236,7 @@ if __name__ == "__main__":
         residual={"value": 0.8, "unit": "ppm"},
         temperature={"value": 41, "unit": "degF"},
         ph=7.2, baffling_factor=0.5,
-    ))
+    )["summary"])
 
     print("\n" + "=" * 68 + "\n")
 

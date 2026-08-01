@@ -1,5 +1,5 @@
 """
-RO normalization calculator — drop into tools.py.
+RO normalization calculator — drop into tools/calculators/.
 
 Normalizes reverse osmosis performance to reference conditions (25 C, baseline
 net driving pressure) following the ASTM D4516 approach, then compares current
