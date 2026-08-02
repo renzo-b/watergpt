@@ -1,5 +1,5 @@
 """
-Tests for calc_srt — python test_calc_srt.py
+Tests for calc_srt — python tests/test_calc_srt.py
 
 Plain asserts to match units.py and the other calculators — this repo has no
 pytest. Schema conformance is covered by the CALCULATOR_CASES loop in
@@ -14,6 +14,13 @@ break silently. The arithmetic is two multiplications and a divide — if only
 that were tested, every test would pass while the tool returned confident wrong
 numbers.
 """
+
+import sys
+from pathlib import Path
+
+# Running a file in tests/ puts tests/ on sys.path, not the repo root, so
+# `import units` would fail. Same trap the demo blocks use -m to avoid.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from tools.calculators.calc_srt import RAS_MLSS_SIMILARITY, calc_srt
 from tools.registry import all_schemas, dispatch

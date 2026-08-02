@@ -1,5 +1,5 @@
 """
-Tests for the calculator trace — python test_calc_ct_steps.py
+Tests for the calculator trace — python tests/test_calc_ct_steps.py
 
 calc_ct is covered in detail, then every calculator is checked against the
 shape documented in tools/calculators/__init__.py. That shape is a convention
@@ -12,6 +12,13 @@ summaries were captured from the pre-change functions, not written by hand.
 
 Plain asserts to match units.py and the calculators — this repo has no pytest.
 """
+
+import sys
+from pathlib import Path
+
+# Running a file in tests/ puts tests/ on sys.path, not the repo root, so
+# `import units` would fail. Same trap the demo blocks use -m to avoid.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from tools.calculators.calc_ct import calc_ct
 from tools.calculators.calc_food_to_microorganism_ratio import LB_PER_KG
@@ -166,6 +173,32 @@ CALCULATOR_CASES = {
     "calc_svi": {
         "settled_volume": {"value": 200, "unit": "mL/L"},
         "mlss": {"value": 2500, "unit": "mg/L"},
+    },
+    # Behaviour is covered in test_calc_ro_normalization.py; this entry keeps
+    # it in the shared schema-conformance loop with every other calculator.
+    # The only calculator taking nested objects, so it is also the one that
+    # would break a UI assuming flat arguments.
+    "calc_ro_normalization": {
+        "current": {
+            "permeate_flow": {"value": 37, "unit": "m3/h"},
+            "feed_pressure": {"value": 13.5, "unit": "bar"},
+            "concentrate_pressure": {"value": 12.1, "unit": "bar"},
+            "permeate_pressure": {"value": 0.3, "unit": "bar"},
+            "feed_tds": {"value": 820, "unit": "mg/L"},
+            "permeate_tds": {"value": 31, "unit": "mg/L"},
+            "temperature": {"value": 12, "unit": "degC"},
+            "recovery_pct": 75,
+        },
+        "baseline": {
+            "permeate_flow": {"value": 44, "unit": "m3/h"},
+            "feed_pressure": {"value": 12.0, "unit": "bar"},
+            "concentrate_pressure": {"value": 10.95, "unit": "bar"},
+            "permeate_pressure": {"value": 0.3, "unit": "bar"},
+            "feed_tds": {"value": 800, "unit": "mg/L"},
+            "permeate_tds": {"value": 25, "unit": "mg/L"},
+            "temperature": {"value": 15, "unit": "degC"},
+            "recovery_pct": 75,
+        },
     },
 }
 SHAPE = {"summary": str, "result": dict, "steps": list,

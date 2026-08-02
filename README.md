@@ -34,7 +34,7 @@ Then:
 | `python run_evals.py -f calculation_set.yaml`                           | a different eval set — a name in `evals/` or any path                                                              | yes           |
 | `python run_evals.py --type calculation`                                | filter by case type                                                                                                | yes           |
 | `python run_evals.py --id ct-calc-01 --verbose`                         | one case, streaming                                                                                                | yes           |
-| `python test_calc_ct_steps.py`                                          | calculator traces + schema conformance                                                                             | no            |
+| `python tests/test_calc_ct_steps.py`                                    | calculator traces + schema conformance; the other `tests/test_calc_*.py` cover one calculator each                 | no            |
 | `python units.py`                                                       | unit-layer self-tests (conversions, affine temperature, dimension mismatches)                                      | no            |
 | `python check_rule_coverage.py`                                         | which prompt rules have no eval case, and vice versa                                                               | no            |
 | `python -m tools.calculators.calc_ct`                                   | that calculator's demo block: a worked case in metric, the same case in US units, and a swapped-argument rejection | no            |
@@ -43,7 +43,9 @@ Use `-m` for the demo blocks, not a file path — `python tools/calculators/calc
 puts the calculator's own directory on `sys.path` instead of the repo root, so
 `import units` fails. (`-m` also prints a `RuntimeWarning` about the module
 already being in `sys.modules`; that's expected and harmless — it's the same
-double-import the registry tolerates, see `tools/registry.py`.)
+double-import the registry tolerates, see `tools/registry.py`.) The files in
+`tests/` hit the same trap, so each one puts the repo root on `sys.path` itself
+— run them by path or with `-m`, from anywhere.
 
 The last three are free and fast. Run them before you commit.
 
@@ -89,7 +91,8 @@ gets someone hurt:
    reporting a computed result.
 3. **`summary` is stable.** The eval harness and CLI read that string. When you
    add a trace to a calculator, build the dict _around_ the existing string —
-   don't regenerate it. `test_calc_ct_steps.py` pins two of them byte-for-byte.
+   don't regenerate it. `tests/test_calc_ct_steps.py` pins two of them
+   byte-for-byte.
 
 ---
 
@@ -106,7 +109,7 @@ gets someone hurt:
 | `evals/eval_set.yaml`                 | 30 operator questions                                                                                                          | you, forever     |
 | `prompt_rules.yaml`                   | rules cross-referenced against eval cases                                                                                      | you              |
 | `run_evals.py`                        | grades tool choice + text                                                                                                      | you, mostly      |
-| `ro_normalization.py`                 | written, not yet wired in — see "Loose ends"                                                                                   | —                |
+| `tests/`                              | one file per calculator, plain asserts, no pytest                                                                              | **you, by hand** |
 
 ---
 
@@ -164,7 +167,7 @@ contract.
    or narrate the steps.
 
 3. **Register it in the test.** Add a case to `CALCULATOR_CASES` in
-   `test_calc_ct_steps.py`. That loop is the only thing keeping the schema
+   `tests/test_calc_ct_steps.py`. That loop is the only thing keeping the schema
    honest — it isn't enforced in code.
 
 ### Assumptions and caveats
@@ -254,10 +257,13 @@ Things a future you should know, roughly in priority order.
    process and jurisdiction and inventing a threshold would repeat the CT-table
    mistake. Add a sourced table if you want the judgement.
 
-3. **`ro_normalization.py` is unwired.** It sits at the repo root with a
-   complete calculator in it and no `@tool` decorator. Drop it into
-   `tools/calculators/`, give it the trace schema, and add it to
-   `CALCULATOR_CASES`.
+3. **`calc_ro_normalization` normalizes dP on permeate flow**, as a proxy for
+   feed flow (exponent 1.5). That holds at constant recovery and drifts when
+   recovery changes, so the tool caveats it and escalates the caveat when the
+   two states disagree on recovery by more than 2 points. Take a measured feed
+   flow and correct on that if you want the dP figure to stand on its own. Its
+   osmotic pressure is the standard TDS approximation too — brackish only, and
+   caveated above 10000 mg/L.
 
 4. **`agent.py` has no test in the repo.** The trace plumbing (`tool_traces`
    index-aligned with `tool_calls`) is only exercised by hand. A mocked-client

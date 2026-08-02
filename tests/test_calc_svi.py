@@ -1,10 +1,17 @@
 """
-Tests for calc_svi — python test_calc_svi.py
+Tests for calc_svi — python tests/test_calc_svi.py
 
 Plain asserts to match units.py and the other calculators — this repo has no
 pytest. Schema conformance for calc_svi is covered by the CALCULATOR_CASES loop
 in test_calc_ct_steps.py; this file covers the SVI-specific behaviour.
 """
+
+import sys
+from pathlib import Path
+
+# Running a file in tests/ puts tests/ on sys.path, not the repo root, so
+# `import units` would fail. Same trap the demo blocks use -m to avoid.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from tools.calculators.calc_svi import SETTLING_LIMIT_ML_L, calc_svi
 from tools.registry import dispatch

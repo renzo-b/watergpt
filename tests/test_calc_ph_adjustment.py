@@ -1,5 +1,5 @@
 """
-Tests for calc_ph_adjustment — python test_calc_ph_adjustment.py
+Tests for calc_ph_adjustment — python tests/test_calc_ph_adjustment.py
 
 Plain asserts to match units.py and the other calculators — this repo has no
 pytest. Schema conformance is covered by the CALCULATOR_CASES loop in
@@ -9,6 +9,13 @@ Organised around the traps rather than the arithmetic. Stages 2 and 3 are
 calc_chemical_feed's, already tested there, so what is worth testing here is
 which stages run, on which basis, and what is refused.
 """
+
+import sys
+from pathlib import Path
+
+# Running a file in tests/ puts tests/ on sys.path, not the repo root, so
+# `import units` would fail. Same trap the demo blocks use -m to avoid.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from tools.calculators.calc_chemical_feed import calc_chemical_feed
 from tools.calculators.calc_ph_adjustment import (
