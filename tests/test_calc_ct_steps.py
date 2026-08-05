@@ -176,6 +176,13 @@ CALCULATOR_CASES = {
     },
     # Behaviour is covered in test_calc_ro_normalization.py; this entry keeps
     # it in the shared schema-conformance loop with every other calculator.
+    # Behaviour is covered in test_calc_osmotic_pressure.py; this entry keeps
+    # it in the shared schema-conformance loop. Seawater on purpose, so the
+    # loop exercises the correlation with the longer trace.
+    "calc_osmotic_pressure": {
+        "concentration": {"value": 35000, "unit": "mg/L"},
+        "temperature": {"value": 25, "unit": "degC"},
+    },
     # The only calculator taking nested objects, so it is also the one that
     # would break a UI assuming flat arguments.
     "calc_ro_normalization": {

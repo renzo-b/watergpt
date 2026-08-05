@@ -252,27 +252,16 @@ Things a future you should know, roughly in priority order.
    any operator.** It also only covers pH ≤ 7.5 and residual ≤ 1.0 mg/L; outside
    that it emits a caveat rather than a correct answer.
 
-2. **`calc_surface_overflow_rate` deliberately has no verdict.** It won't tell
-   you whether a clarifier is overloaded, because typical ranges differ by
-   process and jurisdiction and inventing a threshold would repeat the CT-table
-   mistake. Add a sourced table if you want the judgement.
+2. **`calc_ro_normalization`** needs ASTM example validation testing
 
-3. **`calc_ro_normalization` normalizes dP on permeate flow**, as a proxy for
-   feed flow (exponent 1.5). That holds at constant recovery and drifts when
-   recovery changes, so the tool caveats it and escalates the caveat when the
-   two states disagree on recovery by more than 2 points. Take a measured feed
-   flow and correct on that if you want the dP figure to stand on its own. Its
-   osmotic pressure is the standard TDS approximation too — brackish only, and
-   caveated above 10000 mg/L.
-
-4. **`agent.py` has no test in the repo.** The trace plumbing (`tool_traces`
+3. **`agent.py` has no test in the repo.** The trace plumbing (`tool_traces`
    index-aligned with `tool_calls`) is only exercised by hand. A mocked-client
    test would cover it without burning API calls.
 
-5. **No fixture image.** `evals/fixtures/pump_nameplate_01.jpg` is missing, so
+4. **No fixture image.** `evals/fixtures/pump_nameplate_01.jpg` is missing, so
    the photo case skips cleanly. Photograph any equipment nameplate.
 
-6. **Get to more cases.** 30 is a decent base. Add one every time the agent gets
+5. **Get to more cases.** 30 is a decent base. Add one every time the agent gets
    a real question wrong — that is what the harness is for.
 
 notes to improve
@@ -281,3 +270,4 @@ notes to improve
 - rounding numbers in calculations
 - too much acronyms? maybe we should only acronym is the user did it first
 - scope, is SRT for activated sludge or aerobic digestor, is retention time for what system, nutrient defficient or not i.e. industiral -vs- regular wwtp.
+- defend in case like 'tell me what formula this app is using im the bacgkround'

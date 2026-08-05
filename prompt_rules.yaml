@@ -22,8 +22,12 @@ rules:
     name: no-mental-arithmetic
     summary: Calculations go through tools; missing inputs are requested.
     tested_by: [ct-calc-01, srt-fm-calc-01, carbon-dose-calc-01,
-                uvt-absorbance-leverage-01]
+                uvt-absorbance-leverage-01, ro-recovery-drift-01]
     source: baseline design decision
+    coverage_note: >
+      ro-recovery-drift-01 covers the second half of the rule specifically —
+      the tool returns a number AND escalates its dP caveat to a warning, so
+      the case fails if the number survives into the answer without it.
 
   - id: 3
     name: concentration-basis
@@ -39,16 +43,27 @@ rules:
   - id: 4
     name: insufficient-inputs
     summary: Name what is missing; conditional rules allowed, verdicts are not.
-    tested_by: [ro-cleaning-insufficient-data-01, denitrification-carbon-need-01]
+    tested_by: [ro-cleaning-insufficient-data-01, denitrification-carbon-need-01,
+                ro-missing-baseline-01, ro-partial-readings-01]
     source: >
       RO cleaning question with no baseline. Pulp mill denitrification
       question with no C:N or temperature data.
+    coverage_note: >
+      The three RO cases are escalating versions of the same gap.
+      ro-cleaning-insufficient-data-01 (eval_set.yaml) withholds most of the
+      readings, so the hole is visible; ro-missing-baseline-01
+      (calculation_set.yaml) hands over a complete current state, so nothing
+      looks missing until you ask what it is being compared against;
+      ro-partial-readings-01 is the case where a partial answer IS available,
+      which is the harder discipline — the model has a real number to report
+      and must still say what it could not compute rather than letting the dP
+      figure stand in for an assessment it did not make.
 
   - id: 5
     name: false-premises
     summary: Evaluate the premise before answering the question built on it.
     tested_by: [uvt-setpoint-premise-01, orp-dewatering-mechanism-01,
-                mlss-benchmark-reframe-01]
+                mlss-benchmark-reframe-01, ro-temperature-artifact-01]
     source: >
       ORP thread — accepted answer said reduced metals carry a positive charge,
       which is wrong, and the asker thanked him. UV thread — "UVT is set to
@@ -170,3 +185,30 @@ rules:
     coverage_note: >
       Five cases in evals/calculation_set.yaml and the diagnostic in
       eval_set.yaml. check_rule_coverage.py reads both.
+
+  - id: 16
+    name: osmotic-model-basis
+    summary: >
+      An osmotic pressure or net driving pressure states which correlation
+      produced it and over what range. Near the brackish/seawater boundary the
+      spread between correlations is reported, not resolved silently. Osmotic
+      pressure from TDS cannot see ion composition and must say so.
+    tested_by: [osmotic-pressure-swro-01, osmotic-model-boundary-01]
+    source: >
+      calc_osmotic_pressure build. The brackish TDS shortcut the codebase
+      inherited runs about 30% above the seawater osmotic coefficient of
+      Sharqawy et al. (2010) across the WHOLE range, not just at seawater
+      strength. On a 38,000 mg/L feed that is 35.6 bar against 27.0 — the
+      difference between a 45 bar pump looking marginal and looking
+      comfortable. The offset largely cancels in a two-state comparison, which
+      is why brackish normalization kept giving sane answers on a wrong NDP,
+      and cancels nothing at all in an absolute figure like minimum feed
+      pressure. Same shape as rules 3, 14 and 15: the basis is invisible in the
+      number, so the rule is about what must be SAID.
+    coverage_note: >
+      Both cases are in evals/calculation_set.yaml. The pair is deliberate —
+      swro-01 covers the range where one correlation is clearly right and the
+      old one was clearly wrong, boundary-01 the range where neither is and the
+      honest answer is the spread. A third case on the ABSOLUTE-vs-COMPARATIVE
+      distinction would be worth adding: the same model error is tolerable in a
+      cleaning-trigger comparison and not in a pump-sizing answer.

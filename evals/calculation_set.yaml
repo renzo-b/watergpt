@@ -592,3 +592,279 @@
   notes: >
     Exercises the density path and the from_known_dose branch together. The
     hourly rate matters: feeders are set in rate units, not per day.
+
+# ---------------------------------------------------------------------------
+# calc_ro_normalization — one reference train, five ways of asking about it.
+#
+# The train, and every figure asserted below, is the BASELINE/CURRENT pair
+# pinned in tests/test_calc_ro_normalization.py:
+#
+#   baseline (post-CIP)   44 m3/h, 12.0 / 10.95 / 0.3 bar, 800 / 25 mg/L,
+#                         15 C, 75% recovery
+#   current (fouled)      37 m3/h, 13.5 / 12.1 / 0.3 bar, 820 / 31 mg/L,
+#                         12 C, 75% recovery
+#
+#   -> normalized flow  62.53 -> 51.85 m3/h   (-17.1%)
+#      normalized dP     1.05 -> 1.82 bar     (+72.9%)
+#      salt passage      1.69 -> 2.05 %       (+21.0%)
+#      all three triggers exceeded; NDP baseline 9.88, current 11.19 bar
+#
+# What makes RO different from every other calculator in this file is that the
+# question CANNOT be answered from the current readings alone. A complete
+# second state is a required input, not a nicety, so the clarification case
+# below is as much the point of the tool as the arithmetic is.
+#
+# GRADER NOTE, applies to all five: the tool prints each change twice, once in
+# the summary line (+72.9%) and once in the trigger flag (up 73%). Both are
+# legitimate things for the model to quote, so the percent figures that get
+# rounded in the flags are NOT asserted in must_include. -17.1% is asserted as
+# "17", which matches 17, 17.1 and -17.1% alike under the word-boundary rule.
+# ---------------------------------------------------------------------------
+
+- id: ro-normalization-01
+  type: calculation
+  question: >
+    RO train A is due for a look. Right now it is making 37 m3/h of permeate,
+    feed pressure 13.5 bar, concentrate 12.1 bar, permeate back-pressure
+    0.3 bar, feed TDS 820 mg/L, permeate TDS 31 mg/L, feed temperature 12 C,
+    recovery 75%. Straight after the last CIP in the spring the same train ran
+    44 m3/h at 12.0 bar feed, 10.95 bar concentrate, 0.3 bar permeate,
+    800 mg/L feed TDS, 25 mg/L permeate TDS, 15 C, recovery 75%. Should I
+    clean it?
+  expected_tools: [calc_ro_normalization]
+  expected_answer: >
+    Normalized permeate flow down 17.1% (62.5 -> 51.8 m3/h at 25 C and the
+    9.9 bar baseline NDP), normalized dP up 72.9% (1.05 -> 1.82 bar), salt
+    passage up 21.0% (1.69 -> 2.05%). All three cleaning triggers are exceeded,
+    so yes, clean it. Must carry the tool's caveats: dP is normalized on
+    permeate flow as a proxy for feed flow, and the 10-15% / 15% triggers are
+    industry rules of thumb that the membrane manufacturer's dP limit and the
+    plant's own CIP SOP override.
+  must_include: ["17", "clean"]
+  # The raw, uncorrected dP change is 1.05 -> 1.40 bar, i.e. +33%. That figure
+  # can only come from doing the subtraction by hand instead of normalizing,
+  # so it is the signature of the failure this tool exists to prevent — the
+  # normalized answer is +73%, more than twice as far past the trigger.
+  must_not_include: ["33"]
+  grounding: tool_result
+  notes: >
+    The straight worked case. Every figure is asserted in
+    test_calc_ro_normalization.py section 2.
+
+- id: ro-normalization-us-units-01
+  type: calculation
+  question: >
+    Same RO train, our SCADA reports in US units. Now: 162.9 gpm permeate,
+    195.8 psi feed, 175.5 psi concentrate, 4.351 psi permeate, 820 ppm feed,
+    31 mg/L permeate, 53.6 F, 75% recovery. After the last clean: 193.7 gpm,
+    174.05 psi feed, 158.82 psi concentrate, 4.351 psi permeate, 800 ppm feed,
+    25 mg/L permeate, 59 F, 75% recovery. Do I need to clean?
+  expected_tools: [calc_ro_normalization]
+  expected_answer: >
+    The same answer as ro-normalization-01 — normalized flow down 17.1%, dP up
+    about 73%, salt passage up 21% — which is the point: these are the same
+    physical readings restated, and the comparison is a ratio of two states, so
+    the units must not move it. The model must pass gpm, psi, ppm and F
+    straight through rather than converting them itself. Should surface the
+    tool's ambiguity notes, that gpm is read as US gallons per minute and that
+    ppm is treated as mg/L.
+  # 17.1% is exact here; the dP figure lands at 72.8 rather than 72.9 because
+  # 193.7 gpm is 43.98 m3/h, not 44. Same reason test_calc_ro_normalization.py
+  # section 3 compares the intermediates to a tenth of a percent instead of
+  # exactly. Asserting only the flow figure sidesteps it.
+  must_include: ["17"]
+  must_not_include: []
+  grounding: tool_result
+  notes: >
+    The unit-independence case, mirroring hrt-us-units-01. A model that
+    converts to metric before calling loses the gpm and ppm notes.
+
+- id: ro-temperature-artifact-01
+  type: correction
+  question: >
+    Train B has fallen off a cliff. Permeate was 40 m3/h back in August and
+    it is 25.2 m3/h this morning, that is a 37% drop, so the membranes have to
+    be fouled and I am booking a CIP. August readings were 11.0 bar feed,
+    10.0 bar concentrate, 0.2 bar permeate, 750 mg/L feed TDS, 22 mg/L permeate
+    TDS, 25 C, 75% recovery. Today: 11.0 bar feed, 10.5 bar concentrate,
+    0.2 bar permeate, 750 mg/L feed, 22 mg/L permeate, 12 C, 75% recovery.
+  # The whole reason this is a tool: the raw flow trend says -37% and the
+  # normalized trend says -3.2%. The difference is 13 C of seasonal
+  # temperature, worth a TCF of 1.587. Nothing is fouling.
+  #
+  # The premise ("must be fouled") is built on the uncorrected reading, so
+  # rule 5 applies alongside rule 2 — evaluate the premise before answering.
+  expected_tools: [calc_ro_normalization]
+  expected_answer: >
+    Rejects the fouling premise. Normalized to 25 C the flow is 40.0 -> 38.7
+    m3/h, a 3.2% decline, well inside the 10-15% trigger; normalized dP is
+    unchanged at 1.00 bar and salt passage is unchanged at 1.59%. The raw drop
+    is seasonal temperature, 25 C to 12 C, a temperature correction factor of
+    about 1.59. Should point out that the differential pressure FELL, 1.0 to
+    0.5 bar raw, which is the opposite of what fouling does, and that a CIP
+    here costs membrane life for nothing.
+  # "temperature" is what the answer turns on; 3.2 is the tool's normalized
+  # figure. The model may legitimately quote the 37% raw drop while explaining
+  # it away, so that number is deliberately not banned.
+  must_include: ["3.2", "temperature"]
+  # Deliberately empty: the correct answer is "do not clean", which contains
+  # "clean". Negation is invisible to a substring grader — judge this one by
+  # reading expected_answer.
+  must_not_include: []
+  grounding: tool_result
+  notes: >
+    The trap the calculator was written for. Pinned in
+    test_calc_ro_normalization.py section 4, which holds the same train at two
+    temperatures and asserts the normalized change stays under 3%.
+
+- id: ro-missing-baseline-01
+  type: clarification
+  question: >
+    RO train A: permeate flow 37 m3/h, feed 13.5 bar, concentrate 12.1 bar,
+    permeate 0.3 bar, feed TDS 820 mg/L, permeate TDS 31 mg/L, 12 C, recovery
+    75%. Last cleaning was about four months ago. Is it time to clean again?
+  # The CURRENT state is complete — all eight readings — which is exactly what
+  # makes this the hard version. Nothing looks missing until you notice there
+  # is no second state to compare against, and calc_ro_normalization requires
+  # a complete baseline (it raises, naming every absent field, rather than
+  # normalizing against a design value).
+  #
+  # Elapsed time is not a cleaning criterion, so "four months ago" is a
+  # distractor, not a baseline.
+  #
+  # type is `clarification`, NOT `calculation`: a calculation case with no tool
+  # call is graded as a CRITICAL failure, which is exactly backwards here.
+  expected_tools: []
+  expected_answer: >
+    Asks for the post-cleaning baseline — the same eight readings taken right
+    after the last successful CIP, or at commissioning — and says why: without
+    reference conditions these numbers cannot be normalized, and temperature
+    and pressure alone move permeate flow enough to invert the conclusion.
+    May state the decision rule conditionally (10-15% normalized flow decline,
+    15% normalized dP rise, 10-15% salt passage rise) so the operator can apply
+    it once they have the baseline. Must not assume, estimate, or substitute
+    design values, and must not give a clean/do-not-clean verdict. May note
+    that four months elapsed is not itself a criterion.
+  must_include: ["baseline"]
+  # Deliberately empty for the same reason as ro-temperature-artifact-01: every
+  # phrasing of the verdict this case is guarding against also appears in the
+  # correct refusal to give one. Judge by reading expected_answer.
+  must_not_include: []
+  grounding: tool_result
+  notes: >
+    The calculation-set counterpart to ro-cleaning-insufficient-data-01 in
+    eval_set.yaml. That case withholds most of the current readings and expects
+    a document search; this one hands over a complete current state and tests
+    only that the model will not manufacture the second one.
+
+- id: ro-recovery-drift-01
+  type: calculation
+  question: >
+    Train A now: 37 m3/h permeate, 13.5 bar feed, 12.1 bar concentrate, 0.3 bar
+    permeate, 820 mg/L feed TDS, 31 mg/L permeate TDS, 12 C. We pushed recovery
+    up to 82% over the summer. Post-CIP baseline was 44 m3/h, 12.0 bar feed,
+    10.95 bar concentrate, 0.3 bar permeate, 800 mg/L feed, 25 mg/L permeate,
+    15 C, recovery 75%. How is it doing?
+  # Same current readings as ro-normalization-01 with recovery moved 75 -> 82.
+  # The tool still returns numbers, but escalates its dP caveat from a note to
+  # a warning: dP is normalized on permeate flow standing in for feed flow, and
+  # that substitution only holds at constant recovery. Reporting +72.9% here
+  # without the warning is the failure, not the number itself.
+  expected_tools: [calc_ro_normalization]
+  expected_answer: >
+    Normalized flow down 15.8% and normalized dP up 72.9%, both past their
+    triggers; salt passage up 6.9%, which is not. Must carry the escalated
+    caveat that the dP comparison is UNRELIABLE because recovery moved from
+    75% to 82%, and the tool's remedy — re-take the readings at the baseline
+    recovery, or normalize on measured feed flow. The flow and salt-passage
+    figures are unaffected by the recovery change and still support cleaning.
+  # Only "recovery" is asserted. The two percentages both appear rounded in the
+  # trigger flags (16%, 73%) and unrounded in the summary, and "unreliable" is
+  # the tool's word rather than one the model must reuse verbatim — whether the
+  # caveat actually survived into the answer is judged by reading it.
+  must_include: ["recovery"]
+  must_not_include: []
+  grounding: tool_result
+  notes: >
+    Guards system prompt rule 2's second half, "report what the tool returned,
+    including its caveats". The escalation threshold is
+    RECOVERY_DRIFT_LIMIT_PCT = 2.0 and is pinned in
+    test_calc_ro_normalization.py section 7.
+
+- id: osmotic-pressure-swro-01
+  type: calculation
+  question: >
+    New SWRO train, feed is 38,000 mg/L TDS at 20 C. The HP pump curve tops out
+    at 45 bar. Is that enough to make water?
+  expected_tools: [calc_osmotic_pressure]
+  expected_answer: >
+    Osmotic pressure of the feed is about 27.0 bar (392 psi), so 45 bar leaves
+    roughly 18 bar of driving pressure at the feed end BEFORE any losses — but
+    the answer must not stop there. The membrane sees the concentrate-side
+    average, not the feed, so the real figure depends on the design recovery,
+    which the question does not give; at 45% recovery the average is nearer
+    50,000 mg/L and about 36 bar, which leaves very little. Must ask for the
+    design recovery rather than declaring the pump adequate. Must state which
+    correlation produced the number — the seawater osmotic coefficient of
+    Sharqawy et al. (2010) — and that osmotic pressure from TDS alone cannot
+    see ion composition.
+  must_include: ["27", "recovery"]
+  must_not_include: ["35.6", "36 bar of feed"]
+  grounding: tool_result
+  notes: >
+    The case the osmotic module exists for. must_not_include catches the old
+    brackish shortcut's answer for this water, 35.6 bar, which would have made
+    the 45 bar pump look marginal-to-inadequate at the feed end alone. Pinned
+    in test_calc_osmotic_pressure.py section 4.
+
+- id: osmotic-model-boundary-01
+  type: calculation
+  question: >
+    High-TDS brackish well, 12,000 mg/L at 20 C. What is the osmotic pressure?
+  expected_tools: [calc_osmotic_pressure]
+  expected_answer: >
+    About 8.4 bar from the seawater osmotic coefficient, which is the
+    correlation selected above 10,000 mg/L. The answer must carry the tool's
+    spread: the brackish TDS approximation gives 11.0 bar for the same water,
+    roughly 30% higher, and at 12,000 mg/L both are arguable — this is a well,
+    not seawater, so the seawater correlation's ion-composition assumption is
+    doing work it was not fitted for. A single number quoted to two decimals
+    without that spread is the failure mode. Should say an ion analysis is what
+    resolves it.
+  must_include: ["8.4", "11"]
+  must_not_include: []
+  grounding: tool_result
+  notes: >
+    Guards the overlap band, OVERLAP_LO_MG_L to OVERLAP_HI_MG_L. The two
+    correlations disagree by ~30% across the whole range, so the boundary is
+    where the model must report both rather than pick one. Pinned in
+    test_calc_osmotic_pressure.py section 7.
+
+- id: ro-partial-readings-01
+  type: calculation
+  question: >
+    Train A, no lab this week so I have no TDS numbers at all. Right now:
+    37 m3/h permeate, feed 13.5 bar, concentrate 12.1 bar, permeate 0.3 bar,
+    12 C, recovery 75%. After the last CIP: 44 m3/h, 12.0 bar feed, 10.95 bar
+    concentrate, 0.3 bar permeate, 15 C, recovery 75%. Anything I can tell from
+    that?
+  expected_tools: [calc_ro_normalization]
+  expected_answer: >
+    Yes — differential pressure is up 33.3%, from 1.05 to 1.40 bar, past the
+    15% trigger. The answer must be explicit that this is RAW dP, not
+    flow-normalized, because the flow-ratio correction needs readings that are
+    present here but the metric it feeds does not run without TDS. Must state
+    that normalized permeate flow and salt passage were NOT computed and name
+    what they need (feed and permeate TDS). Must not report a normalized flow
+    or salt-passage figure, and must not present the dP result as a complete
+    assessment — dP alone cannot distinguish fouling from scaling.
+  must_include: ["33", "salt passage"]
+  must_not_include: ["17.1", "21.0"]
+  grounding: tool_result
+  notes: >
+    The graceful-degradation path, reachable by the model only because
+    _state_schema requires just the two pressures. must_not_include holds the
+    figures from ro-normalization-01, the same train WITH TDS — if either
+    appears the model has carried numbers across from a different case or
+    invented the missing readings. Pinned in test_calc_ro_normalization.py
+    section 9.

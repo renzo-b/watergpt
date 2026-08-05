@@ -42,4 +42,5 @@ from .calc_food_to_microorganism_ratio import *
 from .calc_srt import *
 from .calc_solids_loading_rate import *
 from .calc_svi import *
+from .calc_osmotic_pressure import *
 from .calc_ro_normalization import *
