@@ -82,6 +82,12 @@ MAX_DISTINCT_SHAPE_RATIO = 0.10
 # sheets (Year-to-Date and Sampling Results score far below it).
 GROUP_SIMILARITY = 0.8
 
+# Ceiling on the interpretation itself. The richest sheet so far produces about
+# 2800 tokens, so there is room - but a sheet whose every row deserves its own
+# statement (the 39x30 hazard matrix, if it is ever chunked row-wise) would
+# reach this, and a response cut here cannot be parsed or partially recovered.
+MAX_OUTPUT_TOKENS = 8000
+
 SHEET_FORMATS = {".xlsx", ".xlsm"}
 
 SCHEMA = {
@@ -364,14 +370,29 @@ def extract_sheet(ws_values, ws_formulas):
 
 
 def interpret(client, model, payload):
-    """One API call per sheet, schema-constrained."""
+    """One API call per sheet, schema-constrained.
+
+    Running out of output budget is not an error the API raises - the call
+    returns 200 with stop_reason='max_tokens' and JSON cut mid-structure. Left
+    to json.loads that surfaces as 'Unterminated string at column 7823', which
+    points at everything except the cause. Named here instead: the sheet had
+    more to say than MAX_OUTPUT_TOKENS allowed.
+    """
     response = client.messages.create(
         model=model,
-        max_tokens=8000,
+        max_tokens=MAX_OUTPUT_TOKENS,
         system=SYSTEM,
         messages=[{"role": "user", "content": payload}],
         output_config={"format": {"type": "json_schema", "schema": SCHEMA}},
     )
+    if response.stop_reason == "max_tokens":
+        raise RuntimeError(
+            f"the response hit MAX_OUTPUT_TOKENS ({MAX_OUTPUT_TOKENS}) after "
+            f"{response.usage.output_tokens} tokens, so its JSON is cut off "
+            "and nothing from this sheet can be used. The sheet has more to "
+            "say than the budget allows: raise MAX_OUTPUT_TOKENS, or split "
+            "the sheet and interpret it in parts."
+        )
     text = next(b.text for b in response.content if b.type == "text")
     return json.loads(text)
 

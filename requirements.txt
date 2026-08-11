@@ -9,3 +9,4 @@ anthropic>=0.40      # Claude API client                 -> agent.py
 python-dotenv>=1.0   # reads ANTHROPIC_API_KEY from .env  -> agent.py
 pint>=0.24           # unit parsing & dimension checks    -> units.py
 PyYAML>=6.0          # eval sets & prompt_rules.yaml       -> run_evals.py, check_rule_coverage.py
+openpyxl>=3.1        # reads .xlsx cells, formulas, fills  -> scripts/inspect_sheets.py, scripts/interpret_sheets.py
