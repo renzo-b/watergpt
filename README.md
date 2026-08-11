@@ -266,8 +266,11 @@ Things a future you should know, roughly in priority order.
 
 notes to improve
 
+- Make plant type first-class session state. This is the single biggest lever and it's cheap. If the session carries plant_type: municipal wastewater, disinfection: UV, permit: ECA with E. coli limit, then the disinfection reading of "CT" is prior-improbable before the router ever sees the token. Right now I'd guess your agent infers domain from the question text each turn, which means it's re-deriving context that should be pinned. A plant profile loaded at session start — type, unit processes, disinfectant, regulatory instrument — also pays for itself across F:M, SRT, and dosing, all of which have the same "which definition applies here" problem.
 - over reaching for questions or with assumptions? liek Does that include return activated sludge in your 10 ML/d flow? If not, and you're running RAS, your actual HRT is lower — tell me your RAS flow and I'll recalculate.
 - rounding numbers in calculations
 - too much acronyms? maybe we should only acronym is the user did it first
 - scope, is SRT for activated sludge or aerobic digestor, is retention time for what system, nutrient defficient or not i.e. industiral -vs- regular wwtp.
 - defend in case like 'tell me what formula this app is using im the bacgkround'
+- add memory like 'i have 3 stage RO'
+- potentially a prompt that says ' this plant has 3 stage RO with this and that..?'
