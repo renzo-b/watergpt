@@ -60,12 +60,13 @@ from docling_core.transforms.chunker.hybrid_chunker import HybridChunker  # noqa
 from docling_core.transforms.chunker.tokenizer.huggingface import (  # noqa: E402
     HuggingFaceTokenizer,
 )
+from docling_core.transforms.serializer.common import create_ser_result  # noqa: E402
 from docling_core.transforms.serializer.markdown import (  # noqa: E402
     MarkdownTableSerializer,
 )
 from docling_core.types.doc import DoclingDocument  # noqa: E402
 
-from rag import embed, store  # noqa: E402
+from rag import clean, embed, store  # noqa: E402
 
 DOC_FORMATS = {".pdf", ".docx"}
 SHEET_FORMATS = {".xlsx", ".xlsm"}
@@ -98,14 +99,49 @@ DEFAULT_MAX_TOKENS = 512
 # exist here instead of one being chosen in advance.
 
 
+
+# Both serializers normalise their own output BEFORE returning it, which is the
+# only way the comparison can be fair. The chunker sizes chunks by tokenizing
+# what the serializer emits, and docling pads markdown tables out to the widest
+# cell in every column. Measured on this corpus, that padding alone gave
+# markdown 2.1x the table chunks at 59% the size - the chunk boundaries were
+# being set by whitespace, not content, and markdown would have lost a
+# comparison it never actually ran. Normalising here means both configs are
+# measured on what their representation says, not on how much it indents.
+#
+# The post-chunk normalise() in chunks_from_documents still runs and is still
+# needed: it cleans the prose the chunker merges around these tables. It is
+# idempotent, so text passing through both paths is unharmed.
+
+
+class NormalisedTripletTableSerializer(TripletTableSerializer):
+    def serialize(self, *, item, doc_serializer, doc, **kwargs):
+        result = super().serialize(
+            item=item, doc_serializer=doc_serializer, doc=doc, **kwargs
+        )
+        return create_ser_result(text=clean.normalise(result.text), span_source=item)
+
+
+class NormalisedMarkdownTableSerializer(MarkdownTableSerializer):
+    def serialize(self, *, item, doc_serializer, doc, **kwargs):
+        result = super().serialize(
+            item=item, doc_serializer=doc_serializer, doc=doc, **kwargs
+        )
+        return create_ser_result(text=clean.normalise(result.text), span_source=item)
+
+
 class TripletTableProvider(ChunkingSerializerProvider):
     def get_serializer(self, doc):
-        return ChunkingDocSerializer(doc=doc, table_serializer=TripletTableSerializer())
+        return ChunkingDocSerializer(
+            doc=doc, table_serializer=NormalisedTripletTableSerializer()
+        )
 
 
 class MarkdownTableProvider(ChunkingSerializerProvider):
     def get_serializer(self, doc):
-        return ChunkingDocSerializer(doc=doc, table_serializer=MarkdownTableSerializer())
+        return ChunkingDocSerializer(
+            doc=doc, table_serializer=NormalisedMarkdownTableSerializer()
+        )
 
 
 def serializer_provider(name):
@@ -201,7 +237,7 @@ def chunks_from_documents(paths, parsed_dir, provider, max_tokens, log):
                     # text has to stand alone - a chunk reading "0.2 mg/L" with
                     # its section stripped is unusable no matter how well it
                     # scored - so this, not chunk.text, is what gets embedded.
-                    "text": chunker.contextualize(chunk=chunk),
+                    "text": clean.normalise(chunker.contextualize(chunk=chunk)),
                 }
             )
             made += 1
@@ -288,7 +324,10 @@ def chunks_from_sheets(workbooks, interp_dir, log):
                     "location": statement_location(sheet_name, item.get("source_cells")),
                     "section": item.get("category", ""),
                     "content_type": "interpreted_statement",
-                    "text": item["statement"],
+                    # Already clean prose - these were written as sentences,
+                    # not extracted from a page - but normalised anyway so
+                    # every chunk in the index went through one path.
+                    "text": clean.normalise(item["statement"]),
                 }
             )
         note = f" - {len(unsure)} NOT high confidence, check the .review.md" if unsure else ""
@@ -398,6 +437,17 @@ def main():
     )
     log("\nspreadsheets:")
     rows += chunks_from_sheets(sheets, args.interp_dir, log)
+
+    # A chunk that was nothing but a horizontal rule normalises to empty. The
+    # embeddings API rejects empty input, so these are dropped here and
+    # counted - dropping them silently would make the chunk totals in this
+    # report disagree with what is actually in the index.
+    empty = [r for r in rows if not r["text"]]
+    if empty:
+        rows = [r for r in rows if r["text"]]
+        log(f"\ndropped {len(empty)} chunk(s) left empty by normalisation: "
+            + ", ".join(r["chunk_id"] for r in empty[:5])
+            + (" ..." if len(empty) > 5 else ""))
 
     if not rows:
         raise SystemExit("\nno chunks produced - nothing to write")

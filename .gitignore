@@ -3,6 +3,7 @@ documents/*
 !documents/rag_test/
 !documents/test/
 data/*
+scratch/*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
