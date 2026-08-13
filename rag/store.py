@@ -169,9 +169,7 @@ def write_chunks(collection, rows, config_id, plant_id, batch=1000):
 
 def scope_summary(collection, config_id, plant_id):
     """(content_type, count) pairs for the end-of-run report."""
-    got = collection.get(
-        where=scope_filter(config_id, plant_id), include=["metadatas"]
-    )
+    got = collection.get(where=scope_filter(config_id, plant_id), include=["metadatas"])
     counts = {}
     for meta in got.get("metadatas") or []:
         key = meta.get("content_type", "?")
