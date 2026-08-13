@@ -17,7 +17,7 @@ cases:
       Raw water turbidity jumped from 2 to 40 NTU overnight after spring
       runoff, TOC is up too. We dose alum for coagulation — how should I
       think about adjusting the dose, and what does it do to pH/alkalinity?
-    expected_tools: [search_plant_docs, search_plant_logs] # ideally also checks plant_notes for past events
+    expected_tools: [search_plant_logs] # ideally also checks plant_notes for past events
     expected_behavior: >
       Explains higher turbidity/TOC generally needs more coagulant; notes alum
       consumes alkalinity and drops pH so may need pH adjustment; grounds
@@ -35,7 +35,7 @@ cases:
     question: >
       My last RO cleaning was 4 months ago. Normalized permeate flow is
       37 m3/h and pressure drop is 1.4 bar. Is it time to clean the membranes?
-    expected_tools: [search_plant_docs, search_plant_logs]
+    expected_tools: [search_plant_logs]
     expected_behavior: >
       Recognizes the values are meaningless without reference conditions and
       asks for what's missing before advising: baseline/post-cleaning
@@ -62,7 +62,7 @@ cases:
       RO train A: normalized permeate flow is 37 m3/h, down from 44 m3/h
       after the last clean. Normalized dP across stage 1 is 1.4 bar, was
       1.05 bar. Normalized salt passage is up about 8%. Should I clean?
-    expected_tools: [search_plant_docs, search_plant_logs]
+    expected_tools: [search_plant_logs]
     expected_behavior: >
       Computes the changes (~16% flow decline, ~33% dP rise), compares to the
       standard 10-15% flow / 15% dP triggers, and concludes cleaning is
@@ -302,7 +302,7 @@ cases:
       Our aeration basin went septic overnight, DO crashed and the effluent
       turned. We think an industrial user dumped something. What now, and
       how do we stop it happening again?
-    expected_tools: [search_plant_logs, search_plant_docs]
+    expected_tools: [search_plant_logs]
     expected_behavior: >
       Splits immediate response from prevention. Immediate: stabilize the
       process, check for toxicity versus simple organic overload, pull
@@ -366,7 +366,7 @@ cases:
       Our sequence is ferric coagulant, then polymer injection, then caustic
       for pH control before the clarifier. Floc looks weak. Should I move the
       caustic ahead of the polymer?
-    expected_tools: [search_plant_docs]
+    expected_tools: []
     expected_behavior: >
       Says yes, and explains why: polymer flocculation should be the last
       chemical step, with only gentle mixing after it, because polymer
@@ -420,7 +420,7 @@ cases:
     question: >
       I've lost my sludge blanket in a cone-bottom lamella clarifier. How do
       I rebuild it and tune withdrawal so I don't cone again?
-    expected_tools: [search_plant_docs]
+    expected_tools: []
     expected_behavior: >
       Gives the sequence: blow the unit down and wash accumulated solids off
       the plates and walls toward the cone, refill slowly with clean water so
@@ -477,7 +477,7 @@ cases:
       Same selenium plant — we're planning to inject hydrogen peroxide into
       the solids stream to hold ORP positive, stop the sludge digesting, and
       control sulfides. Any concerns?
-    expected_tools: [search_plant_docs]
+    expected_tools: []
     expected_behavior: >
       Flags the process-level conflict: selenium removal here depends on
       reducing soluble selenate and selenite to insoluble elemental selenium,
@@ -530,7 +530,7 @@ cases:
     question: >
       Our UV system keeps running more channels than the flow needs. UVT is
       set to 65% and dose is 50 mJ/cm3. Is one of our parameters wrong?
-    expected_tools: [search_plant_docs]
+    expected_tools: []
     expected_behavior: >
       Corrects the premise that UVT is a setpoint. UVT is a measured property
       of the wastewater — the control system reads it, it cannot control to
@@ -607,7 +607,7 @@ cases:
       Extended aeration plant, 22 MGD design, we usually run 10-13 MGD. I
       just learned to run MLSS and we're around 6000. Old operators say it
       was 2000-3000 when the plant was new. What should we be running?
-    expected_tools: [search_plant_docs, search_plant_logs]
+    expected_tools: [search_plant_logs]
     expected_behavior: >
       Reframes rather than quoting a target range. Explains MLSS is a
       dependent variable set by the chosen SRT (or F:M) at the plant's
@@ -698,7 +698,7 @@ cases:
       We've got heavy scum on our secondary clarifiers, maybe 50% coverage.
       Someone suggested just hosing it into the effluent launder to clear it.
       We're usually close to our TSS permit limit. Thoughts?
-    expected_tools: [search_plant_docs]
+    expected_tools: []
     expected_behavior: >
       Rejects the suggestion clearly. Hosing scum into the effluent launder
       discharges FOG and solids past the weir into final effluent, directly
@@ -756,7 +756,7 @@ cases:
       to blend with WAS and go to the centrifuge, but we don't want to spend
       polymer on it, so it gets decanted and the decant goes back to
       headworks. We have a persistent FOG problem. Are these related?
-    expected_tools: [search_plant_docs]
+    expected_tools: []
     expected_behavior: >
       Identifies the closed loop as the core issue: FOG entering with septage
       has no exit path from the plant, so it recirculates between headworks

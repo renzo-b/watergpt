@@ -1,0 +1,365 @@
+#!/usr/bin/env python3
+"""Measure retrieval, one config against another.
+
+    python scripts/eval_retrieval.py --plant-id demo \\
+        --configs triplet_tables markdown_tables
+
+Calls rag.retrieval.search_plant_docs directly rather than going through the
+agent. That is the whole design: if a model reformulated the query first, a
+difference between two configs could be the reformulation rather than the
+chunking, and there would be no way to tell which from the numbers.
+
+Two artefacts, because the aggregate and the detail answer different questions.
+The recall table tells you THAT something differs. The per-case file - every
+chunk that came back, its location, and its full text - tells you WHY, which is
+the only part you can act on.
+
+Grading a retrieval case means deciding whether the right chunk came back, and
+that is a question about provenance, not about wording: a case passes when a
+retrieved chunk's document and location match what the case says the answer
+lives in. Two numbers are reported for every slice:
+
+  strict    document AND location match - the real number
+  doc-only  document matches, location does not
+
+The gap between them is diagnostic rather than decorative. A high doc-only with
+a low strict means retrieval is finding the right document and the chunk
+boundaries are landing somewhere else, which is a chunking problem. Both low
+means the query is not finding the document at all, which is an embedding or
+phrasing problem. Reporting only the strict number hides which of those you have.
+"""
+
+import argparse
+import re
+import sys
+import time
+from pathlib import Path
+
+import yaml
+
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+DEFAULT_SET = ROOT / "evals" / "retrieval_set.yaml"
+RUNS_DIR = ROOT / "evals" / "runs"
+
+# A negative case passes when nothing plausible comes back. "Plausible" needs a
+# number, and cosine similarity has no natural zero: unrelated text in the same
+# domain still scores well above 0 because it shares vocabulary. This is a
+# starting value, not a constant of nature - sweep it with --threshold and read
+# the scores in the detail file before trusting any negative-case pass rate.
+DEFAULT_THRESHOLD = 0.35
+
+
+# --------------------------------------------------------------------------
+# Matching
+# --------------------------------------------------------------------------
+# Kept as free functions with no imports from rag.* so they can be tested
+# without a database - see tests/test_retrieval_matching.py.
+
+
+def norm_document(name):
+    """Compare documents by filename, ignoring path and case."""
+    return Path(str(name).strip()).name.casefold()
+
+
+def norm_location(text):
+    """Fold the ways a page or sheet reference gets written into one form.
+
+    The eval set is written the way an operator would say it ('page 1'), and
+    the index stores what docling reports ('p.1'). Neither spelling is wrong,
+    so neither is rewritten - they are compared after normalisation instead.
+    """
+    s = str(text).strip().casefold()
+    s = s.replace("’", "'").replace("–", "-").replace("—", "-")
+    s = re.sub(r"\bpages?\b", "p.", s)  # page 7 / pages 7-8 -> p. 7 / p. 7-8
+    s = re.sub(r"\bpp?\.", "p.", s)  # pp.7-8 -> p.7-8
+    s = re.sub(r"p\.\s+", "p.", s)  # p. 7 -> p.7
+    s = re.sub(r"[\s_]+", " ", s)
+    return s.strip(" .,;")
+
+
+def matches(chunk, source):
+    """Return (document_matches, location_matches) for one chunk.
+
+    Location is a containment test in both directions on purpose. An expected
+    "sheet 'CT Calc'" should be satisfied by an actual "sheet 'CT Calc', cells
+    C31, C33", and an expected "p.7, section 4" by an actual "p.7". Requiring
+    equality would score a correct retrieval as a miss because the index writes
+    a more precise location than the case does.
+    """
+    doc_ok = norm_document(chunk.document) == norm_document(source["document"])
+    want = norm_location(source["location"])
+    got = norm_location(chunk.location)
+    loc_ok = bool(want) and bool(got) and (want in got or got in want)
+    return doc_ok, doc_ok and loc_ok
+
+
+def first_hit(chunks, source):
+    """1-based rank of the first strict hit, and of the first doc-only hit."""
+    strict = doc_only = None
+    for rank, chunk in enumerate(chunks, start=1):
+        doc_ok, both = matches(chunk, source)
+        if both and strict is None:
+            strict = rank
+        if doc_ok and doc_only is None:
+            doc_only = rank
+    return strict, doc_only
+
+
+# --------------------------------------------------------------------------
+# Scoring
+# --------------------------------------------------------------------------
+
+
+def load_cases(path):
+    """Accept a bare list or a mapping with 'cases:' - both shapes are in use
+    across evals/, and the failure when a file uses the other one is an
+    unhelpful TypeError deep in the run."""
+    spec = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if isinstance(spec, list):
+        cases = spec
+    elif isinstance(spec, dict) and isinstance(spec.get("cases"), list):
+        cases = spec["cases"]
+    else:
+        raise SystemExit(f"{path} must be a list of cases or a mapping with 'cases:'")
+    cases = [c for c in cases if c]
+    missing = [c.get("id", "<no id>") for c in cases if "expects" not in c]
+    if missing:
+        raise SystemExit(
+            f"{path}: cases with no 'expects' block: {', '.join(missing)}. "
+            "A retrieval case with nothing to expect cannot be scored."
+        )
+    return cases
+
+
+def recall(results, cutoff, key):
+    """Fraction of sourced cases whose first hit lands at or above `cutoff`."""
+    sourced = [r for r in results if not r["negative"]]
+    if not sourced:
+        return None, 0
+    hits = sum(1 for r in sourced if r[key] is not None and r[key] <= cutoff)
+    return hits / len(sourced), len(sourced)
+
+
+def fmt(value):
+    return "  n/a" if value is None else f"{value * 100:4.0f}%"
+
+
+def slice_table(results, label_width=22):
+    """Overall row plus one row per case `type`."""
+    lines = []
+    groups = [("ALL", results)]
+    for case_type in sorted({r["type"] for r in results}):
+        groups.append((case_type, [r for r in results if r["type"] == case_type]))
+
+    header = f"{'slice':<{label_width}} {'n':>3}  {'R@5':>5} {'R@10':>5}   {'doc@5':>5} {'doc@10':>6}   neg"
+    lines.append(header)
+    lines.append("-" * len(header))
+    for label, group in groups:
+        r5, n = recall(group, 5, "strict")
+        r10, _ = recall(group, 10, "strict")
+        d5, _ = recall(group, 5, "doc_only")
+        d10, _ = recall(group, 10, "doc_only")
+        negatives = [g for g in group if g["negative"]]
+        neg = (
+            f"{sum(1 for g in negatives if g['passed'])}/{len(negatives)}"
+            if negatives
+            else "-"
+        )
+        lines.append(
+            f"{label:<{label_width}} {n:>3}  {fmt(r5)} {fmt(r10)}   "
+            f"{fmt(d5)} {fmt(d10):>6}   {neg}"
+        )
+    return lines
+
+
+# --------------------------------------------------------------------------
+
+
+def run_config(
+    cases, config_id, plant_id, k, threshold, embedding_model, collection, search
+):
+    results = []
+    for case in cases:
+        source = case["expects"].get("source")
+        negative = source is None
+        chunks = search(
+            query=case["question"],
+            plant_id=plant_id,
+            config_id=config_id,
+            k=k,
+            collection=collection,
+            embedding_model=embedding_model,
+        )
+
+        if negative:
+            # "Passes if nothing above a similarity threshold is returned."
+            # Retrieval always returns its k nearest neighbours - there is no
+            # such thing as an empty result - so the negative case is a
+            # statement about scores, not about count.
+            above = [c for c in chunks if c.score >= threshold]
+            passed, strict, doc_only = not above, None, None
+        else:
+            for field in ("document", "location"):
+                if field not in source:
+                    raise SystemExit(
+                        f"case {case['id']}: expects.source has no {field!r}. "
+                        "Both are required - a source without a location cannot "
+                        "be scored strictly, only by document."
+                    )
+            strict, doc_only = first_hit(chunks, source)
+            passed = strict is not None and strict <= k
+
+        results.append(
+            {
+                "id": case["id"],
+                "type": case.get("type", "untyped"),
+                "question": case["question"].strip(),
+                "negative": negative,
+                "source": source,
+                "passed": passed,
+                "strict": strict,
+                "doc_only": doc_only,
+                "chunks": chunks,
+            }
+        )
+    return results
+
+
+def write_detail(path, args, per_config, threshold):
+    out = [
+        "# Retrieval detail",
+        "",
+        f"- set: `{args.set.relative_to(ROOT) if args.set.is_relative_to(ROOT) else args.set}`",
+        f"- plant: `{args.plant_id}`  k: {args.k}  threshold: {threshold}",
+        f"- embedding model: `{args.embedding_model}`",
+        "",
+        "Every chunk returned, in rank order, with the text that was embedded.",
+        "A chunk marked HIT matched the case's expected document and location.",
+        "",
+    ]
+    for config_id, results in per_config.items():
+        out += [f"## config `{config_id}`", ""]
+        for r in results:
+            verdict = "PASS" if r["passed"] else "FAIL"
+            out.append(f"### {r['id']} — {verdict}  ({r['type']})")
+            out.append("")
+            out.append(f"> {r['question']}")
+            out.append("")
+            if r["negative"]:
+                out.append(
+                    f"Negative case: passes when nothing scores >= {threshold}. "
+                    f"Top score was "
+                    + (f"{r['chunks'][0].score:.3f}." if r["chunks"] else "n/a (no rows).")
+                )
+            else:
+                out.append(
+                    f"Expected `{r['source']['document']}` @ `{r['source']['location']}` "
+                    f"— first strict hit at rank {r['strict'] or '-'}, "
+                    f"first document match at rank {r['doc_only'] or '-'}."
+                )
+            out.append("")
+            if not r["chunks"]:
+                out += ["_nothing returned — is this config indexed for this plant?_", ""]
+                continue
+            for rank, chunk in enumerate(r["chunks"], start=1):
+                tag = ""
+                if not r["negative"]:
+                    doc_ok, both = matches(chunk, r["source"])
+                    tag = "  **HIT**" if both else ("  *(document only)*" if doc_ok else "")
+                out.append(
+                    f"**{rank}.** `{chunk.score:.3f}` {chunk.cite()} "
+                    f"·  {chunk.content_type} ·  `{chunk.chunk_id}`{tag}"
+                )
+                if chunk.section:
+                    out.append(f"section: {chunk.section}")
+                out += ["", "```", chunk.text, "```", ""]
+        out.append("")
+    path.write_text("\n".join(out), encoding="utf-8")
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Compare retrieval configs against evals/retrieval_set.yaml."
+    )
+    parser.add_argument("--set", type=Path, default=DEFAULT_SET)
+    parser.add_argument("--plant-id", required=True)
+    parser.add_argument(
+        "--configs",
+        nargs="+",
+        required=True,
+        help="config_id values to compare, as passed to build_index.py",
+    )
+    parser.add_argument("--k", type=int, default=10)
+    parser.add_argument("--threshold", type=float, default=DEFAULT_THRESHOLD)
+    parser.add_argument("--embedding-model", default=None)
+    parser.add_argument(
+        "--store-path", type=Path, default=None, help="Chroma directory"
+    )
+    parser.add_argument("--out", type=Path, default=None)
+    parser.add_argument("--id", help="run a single case id")
+    parser.add_argument("--type", help="filter by case type")
+    args = parser.parse_args()
+
+    # Deferred so the matching functions above stay importable without chromadb
+    # or an embeddings key - tests exercise them directly.
+    from rag import embed, store
+    from rag.retrieval import search_plant_docs
+
+    args.embedding_model = args.embedding_model or embed.DEFAULT_MODEL
+
+    if args.k < 10:
+        raise SystemExit("--k must be at least 10; recall@10 is part of the report")
+
+    cases = load_cases(args.set)
+    if args.type:
+        cases = [c for c in cases if c.get("type") == args.type]
+    if args.id:
+        cases = [c for c in cases if c["id"] == args.id]
+    if not cases:
+        raise SystemExit("no cases matched that filter")
+
+    active = len(cases)
+    print(f"{args.set.name}: {active} active case(s)")
+    negatives = sum(1 for c in cases if c["expects"].get("source") is None)
+    if not negatives:
+        # Worth saying out loud. A set where every case has a findable answer
+        # cannot catch the failure that matters most in an operations context:
+        # confidently returning something for a question the corpus does not
+        # answer. The commented-out rag_not_in_corpus case in the set is
+        # exactly this, and it is not currently running.
+        print(
+            "  WARNING: no negative cases (expects.source: null). Nothing here "
+            "measures what happens when the answer is not in the corpus."
+        )
+
+    started = time.time()
+    _client, collection = store.open_collection(args.store_path, create=False)
+    per_config = {}
+    for config_id in args.configs:
+        print(f"\n{config_id}")
+        results = run_config(
+            cases,
+            config_id,
+            args.plant_id,
+            args.k,
+            args.threshold,
+            args.embedding_model,
+            collection,
+            search_plant_docs,
+        )
+        per_config[config_id] = results
+        for line in slice_table(results):
+            print("  " + line)
+
+    RUNS_DIR.mkdir(parents=True, exist_ok=True)
+    out = args.out or RUNS_DIR / f"{time.strftime('%Y%m%d-%H%M%S')}-retrieval.md"
+    write_detail(out, args, per_config, args.threshold)
+    print(f"\n{time.time() - started:.0f}s   detail -> {out}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

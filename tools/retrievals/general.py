@@ -1,80 +1,16 @@
 # ---------------------------------------------------------------------------
 # Retrieval — stubbed fixture today, pgvector tomorrow
+#
+# search_plant_docs used to live here as a keyword search over a two-chunk
+# fixture. It is gone: the real implementation is rag/retrieval.py, backed by
+# pgvector, and it is deliberately NOT registered as a tool yet. The eval
+# harness calls it directly so the model's query reformulation cannot confound
+# a comparison between two chunking configs. Register it here once the
+# comparison is settled and the tool description can be written against
+# retrieval that actually works.
 # ---------------------------------------------------------------------------
 
 from tools.registry import tool
-
-DOC_CHUNKS = [
-    {
-        "doc": "Grundfos DDA Metering Pump O&M Manual",
-        "page": 47,
-        "text": "Service kit selection: for DDA 7.5-16 models with PVDF liquid "
-        "end, order service kit 98546712 (diaphragm, valve balls, "
-        "seats, O-rings). Replace diaphragm every 8000 operating "
-        "hours or upon leak detection at the drain port.",
-    },
-    {
-        "doc": "Plant SOP-14 Filter Media Inspection",
-        "page": 3,
-        "text": "Filter drain-down: close influent valve FV-301, open waste "
-        "valve WV-303, allow level to drop to 150 mm above media "
-        "before isolating backwash supply. Confirm lockout of "
-        "backwash pump BP-2 prior to entry.",
-    },
-]
-
-
-@tool(
-    name="search_plant_docs",
-    wants_plant_id=True,
-    description=(
-        "Search documents THIS plant uploaded: O&M manuals specific to this "
-        "site, SOPs, as-built drawings, design reports. Static reference "
-        "material describing how the plant is built and how procedures are "
-        "meant to be performed. "
-        "NOT for dated operator entries or past events — use search_plant_logs. "
-        "NOT for generic manufacturer documentation — use search_manuals. "
-        "Returns text chunks with document title and page number for citation."
-    ),
-    input_schema={
-        "type": "object",
-        "properties": {
-            "query": {
-                "type": "string",
-                "description": (
-                    "Search terms. Include equipment tags (e.g. 'FV-301'), "
-                    "model numbers, or fault codes verbatim if known."
-                ),
-            },
-            "doc_type": {
-                "type": "string",
-                "enum": ["sop", "manual", "drawing", "any"],
-                "description": "Narrow the corpus. Omit or use 'any' if unsure.",
-            },
-        },
-        "required": ["query"],
-    },
-)
-def search_plant_docs(query, plant_id, doc_type=None):
-    """Keyword search over the fixture corpus. Replace with hybrid retrieval."""
-    terms = [t.lower() for t in query.split() if len(t) > 3]
-    scored = []
-    for c in DOC_CHUNKS:
-        hay = (c["text"] + " " + c["doc"]).lower()
-        score = sum(1 for t in terms if t in hay)
-        if score:
-            scored.append((score, c))
-    if not scored:
-        return (
-            "No matching documents found for this plant. Do not fabricate "
-            "plant-specific details; say the information is not in the "
-            "uploaded documents."
-        )
-    scored.sort(key=lambda x: -x[0])
-    return "\n\n".join(
-        f"[{c['doc']}, p.{c['page']}]\n{c['text']}" for _, c in scored[:3]
-    )
-
 
 LOGS_CHUNKS = [
     {
@@ -97,7 +33,8 @@ LOGS_CHUNKS = [
         "result is a timestamp plus the operator's note. Use this for prior "
         "occurrences of a problem, what dose or setting was used during a "
         "past event, or seasonal patterns. "
-        "NOT for how a procedure is supposed to be done — use search_plant_docs. "
+        "NOT for how a procedure is supposed to be done — this returns what "
+        "was done, not what should be done. "
         "Cite the entry date when you use a result."
     ),
     input_schema={
@@ -184,8 +121,8 @@ def search_manuals(query):
         "approved procedures. "
         "This is authoritative text — quote section numbers exactly and never "
         "paraphrase a numeric limit or deadline without citing the section. "
-        "NOT for how this plant does something in practice — use "
-        "search_plant_docs. Some sources are reference-only (licensed "
+        "NOT for how this plant does something in practice — this is the "
+        "obligation, not the site procedure. Some sources are reference-only (licensed "
         "standards); for those you will get a citation and summary but no "
         "full text, and you must tell the operator to consult their copy."
     ),

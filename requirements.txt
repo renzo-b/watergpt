@@ -8,5 +8,19 @@
 anthropic>=0.40      # Claude API client                 -> agent.py
 python-dotenv>=1.0   # reads ANTHROPIC_API_KEY from .env  -> agent.py
 pint>=0.24           # unit parsing & dimension checks    -> units.py
-PyYAML>=6.0          # eval sets & prompt_rules.yaml       -> run_evals.py, check_rule_coverage.py
-openpyxl>=3.1        # reads .xlsx cells, formulas, fills  -> scripts/inspect_sheets.py, scripts/interpret_sheets.py
+PyYAML>=6.0          # eval sets & prompt_rules.yaml       -> run_evals.py, check_rule_coverage.py, scripts/eval_retrieval.py
+openpyxl>=3.1        # reads .xlsx cells, formulas, fills  -> scripts/inspect_sheets.py, scripts/interpret_sheets.py, scripts/build_index.py
+
+# Retrieval. Needed to build or query the index; the agent loop itself runs
+# without them, so an install that only wants to run evals can skip this block.
+#
+# Chroma rather than Postgres/pgvector: pgvector is a compiled extension with
+# no prebuilt Windows package, so it costs a Docker daemon or an MSVC build
+# chain before anything can be indexed. Chroma is a pip install and a
+# directory (data/chroma, gitignored). Revisit if this ever outgrows a
+# single-machine harness.
+docling>=2.118       # PDF/docx -> DoclingDocument, HybridChunker -> scripts/inspect_parse.py, scripts/build_index.py
+chromadb>=1.0        # embedded vector store                -> rag/store.py
+openai>=1.40         # EMBEDDINGS ONLY - Anthropic has no embeddings endpoint,
+                     # so vectors come from text-embedding-3. Every reasoning
+                     # call in this repo is still Claude.  -> rag/embed.py

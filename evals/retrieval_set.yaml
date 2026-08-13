@@ -1,0 +1,136 @@
+# RAG retrieval cases — to append to eval_set.yaml.
+#
+# Field names below follow the shape of the existing set (id, type, question);
+# rename to match whatever eval_set.yaml already uses. The one genuinely new
+# field is `expects.source` — the document and location the answer must come
+# from. That is what makes a retrieval case scorable without a human reading
+# every answer: did the right chunk come back, not just a plausible sentence.
+#
+# Case types reused from the existing set: open_grounded, procedure,
+# calculation, diagnostic, clarification, correction.
+#
+# Corpus: fixed SOP/PFD set + interpreted spreadsheets. Not user uploads.
+
+- id: pdf_phone_number
+  type: exact_value
+  question: What's the number for SMDHU?
+  expects:
+    source:
+      document: Adverse-Water-Condition-Notification-Contingency-Plan.pdf
+      location: page 1
+    contains:
+      - 705-721-7520 ext. 8811
+      - 1-888-225-7851
+  notes: >
+    returns the phone numbers
+- id: pdf_dosage
+  type: exact_value
+  question: in the case of bad levels of total coliforms, what's the target free chlorine residual?
+  expects:
+    source:
+      document: Adverse-Water-Quality-HPCs-Standard-Operating-Procedure.pdf
+      location: page 1
+    contains:
+      - 0.2
+      - 0.1
+      - mg/L
+  notes: >
+    returns the exact dosage listed in the document
+
+# - id: rag_ct_below_required
+#   type: procedure
+#   question: CT came out lower than required, what now?
+#   expects:
+#     source:
+#       document: CT Calculation - Surface Water Plant.xlsx
+#       location: sheet 'CT Calc', Part 3 - Conclusion
+#     contains:
+#       - report as an Adverse
+#       - Adverse Reporting Procedure
+#   notes: Cross-document — answer points at another SOP. Check the link survives chunking.
+
+# - id: rag_ccl_free_chlorine
+#   type: open_grounded
+#   question: What is the free chlorine residual critical control limit?
+#   expects:
+#     source:
+#       document: Risk Assessment Outcomes.xlsx
+#       location: sheet 'Sheet1', row 9
+#     contains:
+#       - 0.85 mg/L
+#   notes: Header block above the matrix. Confirm row 9 reached the payload.
+
+# - id: rag_ccp_threshold
+#   type: open_grounded
+#   question: What risk ranking score makes something a CCP?
+#   expects:
+#     source:
+#       document: Risk Assessment Outcomes.xlsx
+#       location: sheet 'Sheet1', row 7
+#     contains: ["10"]
+
+# - id: rag_matrix_pressure_loss
+#   type: diagnostic
+#   question: What can cause us to lose distribution system pressure?
+#   expects:
+#     source:
+#       document: Risk Assessment Outcomes.xlsx
+#       location: sheet 'Sheet1', column H
+#     contains:
+#       - high lift pump failure
+#       - water main break
+#       - power failure
+#   multi_hit: true
+#   notes: >
+#     THE matrix test. Requires the X marks to have been transformed into
+#     statements. A complete answer needs several chunks, so this also tests
+#     whether top-k is deep enough. Expect this to fail before the transform
+#     is built — that is the point of having it in the set now.
+
+# - id: rag_matrix_monitoring_filter_breakthrough
+#   type: diagnostic
+#   question: How do we catch a filter breakthrough?
+#   expects:
+#     source:
+#       document: Risk Assessment Outcomes.xlsx
+#       location: sheet 'Sheet1', row 25, monitoring columns
+#     contains:
+#       - continuous monitoring
+#       - operational checks
+#   multi_hit: true
+#   notes: Second matrix direction — event to monitoring, not event to hazard.
+
+# - id: rag_clearwell_baffling
+#   type: open_grounded
+#   question: What baffling factor do we use for the clearwell?
+#   expects:
+#     source:
+#       document: CT Calculation - Surface Water Plant.xlsx
+#       location: sheet 'CT Calc', Part 2 geometry table
+#     contains: ["0.5"]
+#   notes: Durable plant fact living inside a table on a calculator sheet.
+
+# - id: rag_adverse_notification_timing
+#   type: procedure
+#   question: Bad sample came back — who do I call and how fast?
+#   expects:
+#     source:
+#       document: Adverse-Water-Condition-Notification-Contingency-Plan.pdf
+#       location: p.TODO, section TODO
+#     contains:
+#       - TODO
+#   notes: >
+#     PDF path, and deliberately phrased the way an operator speaks rather than
+#     the way the SOP is written. Fill in from the document — do not paraphrase
+#     from memory, the exact obligation and timing matter.
+
+# - id: rag_not_in_corpus
+#   type: clarification
+#   question: What is our backwash pump impeller part number?
+#   expects:
+#     source: null
+#     behaviour: admit_not_found
+#   notes: >
+#     Negative case. The corpus does not contain this. A system that invents a
+#     part number fails, however fluent the answer. Keep several of these — a
+#     set where everything passes measures nothing.
