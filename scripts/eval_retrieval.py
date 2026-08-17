@@ -80,8 +80,27 @@ def norm_location(text):
     return s.strip(" .,;")
 
 
+def alternatives(source):
+    """Normalise expects.source to a list of acceptable {document, location}.
+
+    A single mapping and a list of mappings are both valid in the eval set,
+    because some facts genuinely live in more than one document. This corpus
+    carries the same free-chlorine corrective action verbatim in three of the
+    plant's SOPs; pinning such a case to one of them scores a correct citation
+    as a miss and tells you retrieval is broken when it is not. That is not a
+    hypothetical - it is how pdf_dosage was written, and it cost a full
+    debugging pass to work out that the eval was wrong rather than the system.
+    """
+    if source is None:
+        return []
+    return list(source) if isinstance(source, list) else [source]
+
+
 def matches(chunk, source):
     """Return (document_matches, location_matches) for one chunk.
+
+    `source` may be one expectation or several; the chunk needs to satisfy any
+    one of them.
 
     Location is a containment test in both directions on purpose. An expected
     "sheet 'CT Calc'" should be satisfied by an actual "sheet 'CT Calc', cells
@@ -89,11 +108,15 @@ def matches(chunk, source):
     equality would score a correct retrieval as a miss because the index writes
     a more precise location than the case does.
     """
-    doc_ok = norm_document(chunk.document) == norm_document(source["document"])
-    want = norm_location(source["location"])
-    got = norm_location(chunk.location)
-    loc_ok = bool(want) and bool(got) and (want in got or got in want)
-    return doc_ok, doc_ok and loc_ok
+    any_doc = any_strict = False
+    for option in alternatives(source):
+        doc_ok = norm_document(chunk.document) == norm_document(option["document"])
+        want = norm_location(option["location"])
+        got = norm_location(chunk.location)
+        loc_ok = bool(want) and bool(got) and (want in got or got in want)
+        any_doc = any_doc or doc_ok
+        any_strict = any_strict or (doc_ok and loc_ok)
+    return any_doc, any_strict
 
 
 def first_hit(chunks, source):
@@ -202,13 +225,14 @@ def run_config(
             above = [c for c in chunks if c.score >= threshold]
             passed, strict, doc_only = not above, None, None
         else:
-            for field in ("document", "location"):
-                if field not in source:
-                    raise SystemExit(
-                        f"case {case['id']}: expects.source has no {field!r}. "
-                        "Both are required - a source without a location cannot "
-                        "be scored strictly, only by document."
-                    )
+            for option in alternatives(source):
+                for field in ("document", "location"):
+                    if field not in option:
+                        raise SystemExit(
+                            f"case {case['id']}: expects.source has no {field!r}. "
+                            "Both are required - a source without a location "
+                            "cannot be scored strictly, only by document."
+                        )
             strict, doc_only = first_hit(chunks, source)
             passed = strict is not None and strict <= k
 
@@ -255,10 +279,14 @@ def write_detail(path, args, per_config, threshold):
                     + (f"{r['chunks'][0].score:.3f}." if r["chunks"] else "n/a (no rows).")
                 )
             else:
+                wanted = " or ".join(
+                    f"`{o['document']}` @ `{o['location']}`"
+                    for o in alternatives(r["source"])
+                )
                 out.append(
-                    f"Expected `{r['source']['document']}` @ `{r['source']['location']}` "
-                    f"— first strict hit at rank {r['strict'] or '-'}, "
-                    f"first document match at rank {r['doc_only'] or '-'}."
+                    f"Expected {wanted} — first strict hit at rank "
+                    f"{r['strict'] or '-'}, first document match at rank "
+                    f"{r['doc_only'] or '-'}."
                 )
             out.append("")
             if not r["chunks"]:

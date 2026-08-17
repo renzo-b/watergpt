@@ -9,10 +9,10 @@ and nothing else. There is no config object and no registry: a flag and a
 branch, so the claim "only the serializer varies" is checkable by reading
 twenty lines rather than trusted.
 
-    python scripts/build_index.py --input documents/rag_test \\
+    python scripts/build_index.py --input documents/retrieval_test \\
         --config-id triplet_tables --plant-id demo --table-serializer triplet
 
-    python scripts/build_index.py --input documents/rag_test \\
+    python scripts/build_index.py --input documents/retrieval_test \\
         --config-id markdown_tables --plant-id demo --table-serializer markdown
 
 --dry-run writes the chunks it would embed and calls nothing - no embeddings

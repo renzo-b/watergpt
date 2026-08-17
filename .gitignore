@@ -1,6 +1,6 @@
 evals/runs/*
 documents/*
-!documents/rag_test/
+!documents/retrieval_test/
 !documents/test/
 data/*
 scratch/*

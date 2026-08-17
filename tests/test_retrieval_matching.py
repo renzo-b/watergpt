@@ -22,6 +22,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from eval_retrieval import (  # noqa: E402
+    alternatives,
     first_hit,
     matches,
     norm_document,
@@ -46,7 +47,7 @@ assert norm_location("sheet 'CT Calc'") == "sheet 'ct calc'"
 assert norm_location("sheet  'CT   Calc',  Part 3") == "sheet 'ct calc', part 3"
 
 # 3. Documents compare by filename, not by path or case.
-assert norm_document("documents/rag_test/SOP.pdf") == "sop.pdf"
+assert norm_document("documents/retrieval_test/SOP.pdf") == "sop.pdf"
 assert norm_document("SOP.pdf") == norm_document("  sop.PDF  ")
 
 # 4. A chunk in the right document at the right page is a strict hit.
@@ -106,5 +107,32 @@ assert recall([{"negative": True, "strict": None, "doc_only": None}], 5, "strict
     None,
     0,
 )
+
+# 11. expects.source accepts one mapping or several. A fact stated verbatim in
+#     three of the plant's SOPs has three correct citations, and pinning the
+#     case to one of them scores a correct answer as a miss — which is exactly
+#     what happened to pdf_dosage before it was amended.
+one = {"document": "SOP.pdf", "location": "page 1"}
+assert alternatives(one) == [one]
+assert alternatives([one]) == [one]
+assert alternatives(None) == []
+
+multi = [
+    {"document": "Total-Coliforms.pdf", "location": "page 1"},
+    {"document": "HPCs.pdf", "location": "page 1"},
+    {"document": "E-coli.pdf", "location": "page 1"},
+]
+for name in ("Total-Coliforms.pdf", "HPCs.pdf", "E-coli.pdf"):
+    assert matches(Stub(name, "p.1"), multi) == (True, True), name
+
+# A document outside the accepted set still fails — this is what stops a
+# citation from a different plant's manual counting as correct.
+assert matches(Stub("Byron-Shire-DWMS.pdf", "p.35"), multi) == (False, False)
+
+# Right document from the set, wrong page: document-only, as with a single source.
+assert matches(Stub("HPCs.pdf", "p.4"), multi) == (True, False)
+
+# 12. first_hit ranks against the whole set, reporting the earliest match.
+assert first_hit([Stub("Other.pdf", "p.1"), Stub("HPCs.pdf", "p.1")], multi) == (2, 2)
 
 print("test_retrieval_matching: all assertions passed")

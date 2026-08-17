@@ -60,7 +60,7 @@ def open_collection(path=None, create=True):
     if not create and not store_path.exists():
         raise SystemExit(
             f"no index at {store_path}. Build one first:\n"
-            "  python scripts/build_index.py --input documents/rag_test "
+            "  python scripts/build_index.py --input documents/retrieval_test "
             "--config-id triplet_tables --plant-id demo --table-serializer triplet"
         )
     store_path.mkdir(parents=True, exist_ok=True)
