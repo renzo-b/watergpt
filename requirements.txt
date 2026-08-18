@@ -9,7 +9,12 @@ anthropic>=0.40      # Claude API client                 -> agent.py
 python-dotenv>=1.0   # reads ANTHROPIC_API_KEY from .env  -> agent.py
 pint>=0.24           # unit parsing & dimension checks    -> units.py
 PyYAML>=6.0          # eval sets & prompt_rules.yaml       -> run_evals.py, check_rule_coverage.py, scripts/eval_retrieval.py
-openpyxl>=3.1        # reads .xlsx cells, formulas, fills  -> scripts/inspect_sheets.py, scripts/interpret_sheets.py, scripts/build_index.py
+openpyxl>=3.1        # reads .xlsx cells, formulas, fills  -> scripts/inspect_sheets.py, scripts/interpret_sheets.py, scripts/build_index.py, logs/convert.py
+pandas>=2.0          # converted log sheets as dataframes  -> logs/, and the run_python sandbox
+pyarrow>=15.0        # parquet read/write for converted logs -> logs/convert.py, logs/loader.py
+pydantic>=2.0        # manifest schema & JSON round-trip   -> logs/schema.py
+                     # Already present transitively via the anthropic SDK;
+                     # declared because logs/schema.py imports it directly.
 
 # Retrieval. Needed to build or query the index; the agent loop itself runs
 # without them, so an install that only wants to run evals can skip this block.
