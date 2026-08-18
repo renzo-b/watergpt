@@ -33,8 +33,8 @@ from pathlib import Path
 
 from openpyxl import load_workbook
 
+import plant as plant_paths
 from logs.loader import (
-    PARQUET_DIR,
     append_manifest,
     describe_frame,
     parquet_path,
@@ -271,7 +271,7 @@ def run_converter(source, path):
     return frames
 
 
-def convert_workbook(path, client, model=DEFAULT_MODEL, log=print):
+def convert_workbook(path, client, model=DEFAULT_MODEL, log=print, plant=None):
     """One call, one converter, one parquet + manifest row per sheet."""
     path = Path(path)
     digest = file_hash(path)
@@ -304,7 +304,7 @@ def convert_workbook(path, client, model=DEFAULT_MODEL, log=print):
 
     described = {s["sheet_name"]: s for s in (result or {}).get("sheets", [])}
     entries = []
-    PARQUET_DIR.mkdir(parents=True, exist_ok=True)
+    plant_paths.parquet_dir(plant).mkdir(parents=True, exist_ok=True)
 
     for sheet in wb.sheetnames:
         meta = described.get(sheet, {})
@@ -337,14 +337,16 @@ def convert_workbook(path, client, model=DEFAULT_MODEL, log=print):
             )
             continue
 
-        out = parquet_path(digest, sheet)
+        out = parquet_path(digest, sheet, plant)
         df.to_parquet(out)
         facts = describe_frame(df)
         loaded = int(df.notna().sum().sum())
         entries.append(
             SheetEntry(
                 status="converted",
-                parquet_path=str(out),
+                # Relative to the repo root: an absolute path bakes one
+                # machine's home directory into a file that outlives it.
+                parquet_path=plant_paths.relative(out),
                 warnings=warnings,
                 cell_coverage=(
                     round(loaded / populated[sheet], 3) if populated[sheet] else None
@@ -360,7 +362,7 @@ def convert_workbook(path, client, model=DEFAULT_MODEL, log=print):
         )
 
     for entry in entries:
-        append_manifest(entry)
+        append_manifest(entry, plant)
     return entries
 
 
@@ -368,6 +370,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", required=True, help=".xlsx file or directory")
     parser.add_argument("--model", default=DEFAULT_MODEL)
+    parser.add_argument("--plant", default=plant_paths.DEFAULT_PLANT,
+                        help="which plant's data directory to write into")
     parser.add_argument("--force", action="store_true",
                         help="reconvert workbooks already in the manifest")
     parser.add_argument("--dry-run", action="store_true",
@@ -381,7 +385,7 @@ def main(argv=None):
 
     if args.dry_run:
         for book in books:
-            out = PARQUET_DIR.parent / f"{book.stem}.payload.txt"
+            out = plant_paths.scratch_dir() / f"{book.stem}.payload.txt"
             out.parent.mkdir(parents=True, exist_ok=True)
             out.write_text(render_workbook_payload(book), encoding="utf-8")
             print(f"{out} ({out.stat().st_size:,} bytes)")
@@ -394,13 +398,13 @@ def main(argv=None):
     import anthropic
 
     client = anthropic.Anthropic()
-    done = {e.file_hash for e in read_manifest()}
+    done = {e.file_hash for e in read_manifest(args.plant)}
     for book in books:
         if not args.force and file_hash(book) in done:
             print(f"{book.name}: already converted (use --force)")
             continue
         print(book.name)
-        entries = convert_workbook(book, client, args.model)
+        entries = convert_workbook(book, client, args.model, plant=args.plant)
         ok = [e for e in entries if e.status == "converted"]
         print(f"  {len(ok)}/{len(entries)} sheets converted")
         for e in entries:

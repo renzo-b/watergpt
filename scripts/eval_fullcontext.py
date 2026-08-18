@@ -44,6 +44,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
     sys.path.insert(0, str(ROOT / "scripts"))
 
+import plant as plant_paths  # noqa: E402
 from eval_retrieval import alternatives, load_cases, matches  # noqa: E402
 
 MODEL = "claude-opus-5"
@@ -250,7 +251,8 @@ def main():
         description="Answer retrieval_set.yaml with the whole corpus in context."
     )
     parser.add_argument("--input", type=Path, default=ROOT / "documents" / "retrieval_test")
-    parser.add_argument("--parsed-dir", type=Path, default=ROOT / "data" / "parsed")
+    parser.add_argument("--parsed-dir", type=Path,
+                        default=plant_paths.parsed_dir())
     parser.add_argument("--interp-dir", type=Path, default=ROOT / "data" / "interp")
     parser.add_argument("--set", type=Path, default=ROOT / "evals" / "retrieval_set.yaml")
     parser.add_argument("--plant-id", default="demo", help="recorded in the report only")

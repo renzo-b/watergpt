@@ -11,7 +11,7 @@ thrown away, not grown into a pipeline. What differs by input format lives in
 the EXPECTATIONS table below, not in a class hierarchy: docling returns the
 same DoclingDocument for every format, so only the *expected shape* varies.
 
-    python scripts/inspect_parse.py --input data/corpus --output data/parsed
+    python scripts/inspect_parse.py --input data/corpus \n        --output data/plants/demo/parsed
 
 Documents only - .xlsx/.csv are deliberately NOT handled here. Spreadsheets go
 through inspect_sheets.py (openpyxl), because docling flattens them into a bare
@@ -43,6 +43,9 @@ import traceback  # noqa: E402
 from collections import Counter  # noqa: E402
 from importlib.metadata import PackageNotFoundError, version  # noqa: E402
 from pathlib import Path  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import plant as plant_paths  # noqa: E402
 
 import torch._dynamo  # noqa: E402
 
@@ -456,8 +459,8 @@ def main():
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("data/parsed"),
-        help="directory for the dumps (default: data/parsed)",
+        default=plant_paths.parsed_dir(),
+        help="directory for the dumps (default: the demo plant's parsed/)",
     )
     parser.add_argument(
         "--table-mode",

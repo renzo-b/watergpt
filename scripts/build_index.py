@@ -47,6 +47,8 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+import plant as plant_paths  # noqa: E402
+
 # Imported before anything else touches torch: inspect_parse sets the dynamo
 # environment variables at import time, and they are only read once.
 import inspect_parse  # noqa: E402
@@ -363,7 +365,7 @@ def main():
     parser.add_argument(
         "--parsed-dir",
         type=Path,
-        default=ROOT / "data" / "parsed",
+        default=plant_paths.parsed_dir(),
         help="DoclingDocument JSON from inspect_parse.py (reused when present)",
     )
     parser.add_argument(

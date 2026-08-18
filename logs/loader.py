@@ -13,12 +13,15 @@ from pathlib import Path
 
 import pandas as pd
 
+import plant as plant_paths
 from logs.schema import SheetEntry
 
 ROOT = Path(__file__).resolve().parent.parent
-INDEX_DIR = ROOT / "data" / "log_index"
-PARQUET_DIR = INDEX_DIR / "parquet"
-MANIFEST = INDEX_DIR / "manifest.jsonl"
+
+# Paths come from plant.py rather than living here, so ingest/ and logs/ cannot
+# disagree about where a plant's data sits. Every function below takes an
+# optional `plant`, defaulting to plant.DEFAULT_PLANT, which keeps the call
+# sites that predate multi-plant support working unchanged.
 
 # Joins the levels of a multi-row header into one column name. ASCII on
 # purpose: this lands in generated scripts and on a Windows console, where a
@@ -26,12 +29,13 @@ MANIFEST = INDEX_DIR / "manifest.jsonl"
 SEP = " | "
 
 
-def read_manifest():
+def read_manifest(plant=None):
     """Every manifest entry; the newest write per (file_hash, sheet) wins."""
-    if not MANIFEST.exists():
+    manifest = plant_paths.logs_manifest(plant)
+    if not manifest.exists():
         return []
     entries = {}
-    for line in MANIFEST.read_text(encoding="utf-8").splitlines():
+    for line in manifest.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line:
             continue
@@ -43,20 +47,21 @@ def read_manifest():
     return list(entries.values())
 
 
-def append_manifest(entry):
-    INDEX_DIR.mkdir(parents=True, exist_ok=True)
-    with MANIFEST.open("a", encoding="utf-8") as fh:
+def append_manifest(entry, plant=None):
+    manifest = plant_paths.logs_manifest(plant)
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    with manifest.open("a", encoding="utf-8") as fh:
         fh.write(entry.model_dump_json() + "\n")
 
 
-def parquet_path(file_hash, sheet_name):
+def parquet_path(file_hash, sheet_name, plant=None):
     safe = "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in sheet_name)
-    return PARQUET_DIR / f"{file_hash}__{safe.strip('_')}.parquet"
+    return plant_paths.parquet_dir(plant) / f"{file_hash}__{safe.strip('_')}.parquet"
 
 
-def find(sheet_name, file_hash=None):
+def find(sheet_name, file_hash=None, plant=None):
     """The manifest entry for a sheet. Matches on name, exactly then loosely."""
-    entries = [e for e in read_manifest() if e.status == "converted"]
+    entries = [e for e in read_manifest(plant) if e.status == "converted"]
     if file_hash:
         entries = [e for e in entries if e.file_hash == file_hash]
     for e in entries:
@@ -69,32 +74,32 @@ def find(sheet_name, file_hash=None):
     return None
 
 
-def load_log(sheet_name, file_hash=None):
+def load_log(sheet_name, file_hash=None, plant=None):
     """One converted sheet as a DataFrame. Reads parquet; nothing is executed.
 
     Exposed inside the run_python sandbox. Generated scripts call this rather
     than reading the .xlsx, so two runs of the same question see the same
     columns.
     """
-    entry = find(sheet_name, file_hash)
+    entry = find(sheet_name, file_hash, plant)
     if entry is None:
         known = sorted(
-            {e.sheet_name for e in read_manifest() if e.status == "converted"}
+            {e.sheet_name for e in read_manifest(plant) if e.status == "converted"}
         )
         raise LookupError(
             f"no converted sheet named {sheet_name!r}. Available: "
             f"{', '.join(known) if known else '(none - run logs.convert first)'}"
         )
-    return pd.read_parquet(entry.parquet_path)
+    return pd.read_parquet(plant_paths.resolve(entry.parquet_path))
 
 
-def catalogue(include_unconverted=False):
+def catalogue(include_unconverted=False, plant=None):
     """Every converted sheet, described, for dropping into context.
 
     This is the whole of log retrieval. At this corpus size there is nothing to
     search: the model reads the catalogue and picks a sheet by name.
     """
-    entries = sorted(read_manifest(), key=lambda e: (e.file_path, e.sheet_name))
+    entries = sorted(read_manifest(plant), key=lambda e: (e.file_path, e.sheet_name))
     blocks = []
     for e in entries:
         if e.status == "converted":
@@ -164,9 +169,9 @@ def describe_frame(df):
     )
 
 
-def dump_catalogue(path=None):
+def dump_catalogue(path=None, plant=None):
     """Write the catalogue out so a human can read exactly what the model sees."""
-    text = catalogue(include_unconverted=True)
+    text = catalogue(include_unconverted=True, plant=plant)
     if path:
         Path(path).write_text(text, encoding="utf-8")
     return text
