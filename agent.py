@@ -30,7 +30,7 @@ if not API_KEY:
     )
 
 # Set to whichever model you're using. Swap freely — the loop doesn't care.
-MODEL = "claude-sonnet-4-5"
+MODEL = "claude-sonnet-5"
 MAX_TURNS = 10  # hard stop so a confused agent can't loop forever
 
 def _image_block(path: str) -> dict:

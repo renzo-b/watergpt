@@ -146,7 +146,7 @@ Source = namedtuple("Source", "document location")
 # --------------------------------------------------------------------------
 
 
-def assemble(client, plant, max_doc, max_total, log, terse=True):
+def assemble(client, plant, max_doc, max_total, log, model, terse=True):
     """Build the context payload from the ingest catalogue. Returns (text, included, excluded).
 
     The corpus is no longer re-derived from docling parses here. ingest/ already
@@ -175,7 +175,7 @@ def assemble(client, plant, max_doc, max_total, log, terse=True):
         body = entry.catalogue_entry(terse).split("\n", 1)[1]
         block = f"DOCUMENT: {name}\n{body}"
 
-        tokens = count_tokens(client, block)
+        tokens = count_tokens(client, block, model)
         if tokens > max_doc:
             excluded.append((name, tokens, f"over --max-doc-tokens ({max_doc:,})"))
             continue
@@ -203,9 +203,9 @@ def assemble(client, plant, max_doc, max_total, log, terse=True):
     return text, included, excluded
 
 
-def count_tokens(client, text):
+def count_tokens(client, text, model):
     return client.messages.count_tokens(
-        model=MODEL, messages=[{"role": "user", "content": text or "."}]
+        model=model, messages=[{"role": "user", "content": text or "."}]
     ).input_tokens
 
 
@@ -229,7 +229,7 @@ class Usage:
         return self
 
 
-def ask(client, corpus, question, effort, max_tokens, plant_id, log):
+def ask(client, corpus, question, effort, max_tokens, plant_id, log, model):
     """Answer one case, letting the model fetch document parts as it goes.
 
     The catalogue in the system prompt says what exists and where; it does not
@@ -250,7 +250,7 @@ def ask(client, corpus, question, effort, max_tokens, plant_id, log):
 
     for _ in range(MAX_TOOL_TURNS):
         response = client.messages.create(
-            model=MODEL,
+            model=model,
             max_tokens=max_tokens,
             tools=schemas,
             output_config={
@@ -303,6 +303,9 @@ def main():
                         help="which plant's catalogue to answer from")
     parser.add_argument("--max-doc-tokens", type=int, default=DEFAULT_MAX_DOC_TOKENS)
     parser.add_argument("--max-tokens", type=int, default=DEFAULT_MAX_TOTAL_TOKENS)
+    parser.add_argument("--model", default=DEFAULT_MODEL,
+                        help=f"model to answer with (default: {DEFAULT_MODEL}, "
+                             "the model agent.py ships)")
     parser.add_argument("--full-catalogue", action="store_true",
                         help="render every component description, not "
                              "just those of untitled parts (~50%% more tokens)")
@@ -326,7 +329,7 @@ def main():
 
     corpus, included, excluded = assemble(
         client, args.plant_id, args.max_doc_tokens, args.max_tokens, log,
-        terse=not args.full_catalogue,
+        args.model, terse=not args.full_catalogue,
     )
 
     if args.dump_context:
@@ -351,7 +354,7 @@ def main():
     for case in cases:
         parsed, usage, fetched = ask(
             client, corpus, case["question"].strip(),
-            args.effort, args.answer_tokens, args.plant_id, log,
+            args.effort, args.answer_tokens, args.plant_id, log, args.model,
         )
         cache_write += usage.cache_creation_input_tokens or 0
         cache_read += usage.cache_read_input_tokens or 0
@@ -395,11 +398,12 @@ def main():
     for key, (hit, tot) in sorted(by_type.items()):
         log(f"    {key:20s} {hit}/{tot}")
 
+    price_in, price_out = prices(args.model)
     cost = (
-        cache_write * 1.25 * PRICE_IN
-        + cache_read * 0.1 * PRICE_IN
-        + plain_in * PRICE_IN
-        + out_tokens * PRICE_OUT
+        cache_write * CACHE_WRITE * price_in
+        + cache_read * CACHE_READ * price_in
+        + plain_in * price_in
+        + out_tokens * price_out
     ) / 1_000_000
     log(f"\ntokens: {cache_write:,} cache write, {cache_read:,} cache read, "
         f"{plain_in:,} uncached in, {out_tokens:,} out")
@@ -412,7 +416,7 @@ def main():
     lines = [
         "# Full-context detail", "",
         f"- corpus: {len(included)} documents, {sum(t for _, t in included):,} tokens",
-        f"- model: {MODEL}, effort {args.effort}", "",
+        f"- model: {args.model}, effort {args.effort}", "",
     ]
     for name, tokens, why in excluded:
         lines.append(f"- EXCLUDED {name} ({tokens or '?'} tokens) - {why}")
