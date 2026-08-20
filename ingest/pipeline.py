@@ -1,6 +1,6 @@
 """The upload pipeline: one file in, one catalogued document out.
 
-    python -m ingest.pipeline --input documents/retrieval_test
+    python -m ingest.pipeline --input documents/test
     python -m ingest.pipeline --input techsheet.pdf --dry-run   # no model call
 
     document -> extract (structural, free) -> interpret (model) -> catalogue
@@ -32,9 +32,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import plant as plant_paths  # noqa: E402
+from ingest import extract as extract_mod  # noqa: E402
 from ingest.extract import extract, file_hash, file_type  # noqa: E402
 from ingest.interpret import interpret  # noqa: E402
-from ingest.schema import Component, DocEntry  # noqa: E402
+from ingest.schema import Component, DocEntry, Statement  # noqa: E402
 
 try:
     from dotenv import load_dotenv
@@ -86,6 +87,24 @@ def catalogue(include_failed=False, plant=None):
     if not blocks:
         return "No documents have been ingested yet."
     return "\n\n---\n\n".join(blocks)
+
+
+def dump_catalogue(path=None, plant=None):
+    """Write the catalogue out so a human can read exactly what the model sees.
+
+    The catalogue is assembled in memory on every question and never stored,
+    which makes it the one part of the pipeline you cannot inspect by opening a
+    file. This writes it down. Failed documents are included, because a
+    document missing from context is the thing you most want to notice and the
+    thing least likely to announce itself.
+
+    Debug output, so it goes to scratch/ rather than into the plant directory.
+    """
+    text = catalogue(include_failed=True, plant=plant)
+    out = Path(path) if path else plant_paths.scratch_dir() / "catalogue.txt"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(text, encoding="utf-8")
+    return out, text
 
 
 # --------------------------------------------------------------------------
@@ -152,6 +171,18 @@ def ingest_file(path, client, model=DEFAULT_MODEL, log=print, plant=None):
     if not parts:
         return DocEntry(status="failed", error="no parts extracted", **common)
 
+    # Oversized documents are interpreted coarsely rather than partially. Every
+    # page still gets covered; the descriptions just span more of them, and the
+    # figures are recorded with their locations but not described.
+    oversize = meta["source_chars"] > extract_mod.COARSE_CHARS
+    undescribed = []
+    if oversize:
+        figures = [p for p in parts if p.kind == "image"]
+        parts = extract_mod.coarsen([p for p in parts if p.kind != "image"])
+        undescribed = figures
+        log(f"    over {extract_mod.COARSE_CHARS:,} chars: coarsened to "
+            f"{len(parts)} parts, {len(figures)} figures recorded but not described")
+
     try:
         head, described, usage = interpret(str(path), parts, kind, client, model, log)
     except Exception as exc:  # noqa: BLE001 - recorded, never fatal to the run
@@ -170,6 +201,7 @@ def ingest_file(path, client, model=DEFAULT_MODEL, log=print, plant=None):
             title=part.title,
             description=entry.get("description", ""),
             indexed=entry.get("indexed", True),
+            statements=[Statement(**st) for st in entry.get("statements", [])],
             # Verbatim carries the words themselves; interpreted carries
             # nothing and is read from the source file at fetch time.
             content=part.text if (mode == "verbatim" and part.text) else None,
@@ -177,11 +209,35 @@ def ingest_file(path, client, model=DEFAULT_MODEL, log=print, plant=None):
             error=None if entry else "not described by the model",
         ))
 
+    for part in undescribed:
+        # Not a failure: a decision. They keep their locator so a question
+        # about a figure can still be routed to a page and fetched, but they
+        # carry no description and stay out of context.
+        components.append(Component(
+            component_id=part.component_id,
+            kind="image",
+            locator=part.locator,
+            page_start=part.page_start,
+            page_end=part.page_end,
+            title=part.title,
+            description="",
+            indexed=False,
+            status="ok",
+        ))
+
     if any(c.kind == "log" for c in components):
         try:
             attach_logs(path, components, client, model, log, plant)
         except Exception as exc:  # noqa: BLE001 - the descriptions still stand
             log(f"    log conversion failed: {exc}")
+
+    if undescribed:
+        head["notes"] = (
+            f"Document is over the {extract_mod.COARSE_CHARS:,}-character "
+            f"threshold: sections were merged into chapter-sized blocks and "
+            f"{len(undescribed)} figures were recorded with their page numbers "
+            f"but not described. " + head.get("notes", "")
+        )
 
     covered = sum(len(p.text) + len(p.title) for p in parts)
     entry = DocEntry(
@@ -216,7 +272,9 @@ def find_files(src):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--input", required=True, help="file or directory")
+    # Not required: --catalogue reads the manifest and ingests nothing, so
+    # demanding an input directory to dump the context would be theatre.
+    parser.add_argument("--input", help="file or directory")
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--plant", default=plant_paths.DEFAULT_PLANT,
                         help="which plant's data directory to write into")
@@ -224,7 +282,20 @@ def main(argv=None):
                         help="re-ingest files already in the manifest")
     parser.add_argument("--dry-run", action="store_true",
                         help="extract and report the decomposition, call nothing")
+    parser.add_argument("--catalogue", nargs="?", const="", metavar="PATH",
+                        help="write the context the agent sees to a file and "
+                             "exit (default: scratch/catalogue.txt)")
     args = parser.parse_args(argv)
+
+    if args.catalogue is not None:
+        out, text = dump_catalogue(args.catalogue or None, args.plant)
+        entries = read_manifest(args.plant)
+        print(f"{out} ({len(text):,} chars, ~{len(text) // 4:,} tokens, "
+              f"{len(entries)} documents)")
+        return 0
+
+    if not args.input:
+        parser.error("--input is required unless --catalogue is given")
 
     files = find_files(args.input)
     if not files:
@@ -261,7 +332,15 @@ def main(argv=None):
     import anthropic
 
     client = anthropic.Anthropic()
-    done = {e.file_hash for e in read_manifest(args.plant)}
+    # Only a SUCCESSFUL ingest counts as done. A failed one is recorded so the
+    # failure is visible, not so it is remembered as finished - and its causes
+    # are usually transient (an API outage, an exhausted credit balance, one
+    # malformed file since replaced). Counting failures here would make a run
+    # that died partway unresumable except with --force, which would re-pay for
+    # every document that already worked.
+    done = {
+        e.file_hash for e in read_manifest(args.plant) if e.status == "ingested"
+    }
 
     for path in files:
         if not args.force and file_hash(path) in done:

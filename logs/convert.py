@@ -1,6 +1,6 @@
 """One LLM call per workbook. It writes a converter; code runs it to parquet.
 
-    python -m logs.convert --input documents/retrieval_test
+    python -m logs.convert --input documents/test
     python -m logs.convert --input book.xlsx --dry-run   # payload only, no call
 
 The model sees a structural dump of every sheet in one workbook and returns a

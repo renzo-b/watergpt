@@ -56,6 +56,45 @@ IMAGE_SCALE = 2.0
 MAX_IMAGE_PX = 1100
 
 
+# Above this much extracted text, a document is interpreted at chapter
+# granularity rather than section granularity, and its figures are recorded
+# without being described. A 660-page O&M manual decomposes into ~1700 parts
+# and costs ~700k input tokens to describe one by one, which is more than the
+# rest of a plant's corpus put together.
+#
+# The saving comes from granularity, not from truncation. Every page is still
+# covered; the descriptions are just coarser. Reading only the first N pages of
+# a manual would index the cover, the revision history and the table of
+# contents, and leave page 400 invisible with nothing in the catalogue to say
+# so - and a document that is silently absent is worse than one that is
+# obviously missing.
+COARSE_CHARS = 200_000
+
+# Source text per merged block. Each becomes one catalogue entry with a page
+# range, so this is really "how many pages should one description cover".
+CHAPTER_CHARS = 12_000
+
+# Headings kept in a merged block's title. They cost nothing - they are already
+# extracted - and they are the routing signal: an operator scanning for
+# "sludge dewatering" finds it in the heading list, not in the prose.
+CHAPTER_HEADINGS = 12
+
+# Table text sent for interpretation in a coarsened document. Saying what a
+# table IS needs its header row and a few rows beneath; it does not need the
+# grid, which is fetched from the source when a question actually wants the
+# numbers. A scanned manual parses as 203 tables - many of them layout
+# artefacts - and at the full per-part budget they cost more than its 1285
+# sections did.
+TABLE_PREVIEW_CHARS = 800
+
+# Cells and merged ranges rendered per spreadsheet sheet. Counts CELLS, not
+# rows: 22 columns x 50 rows is already ~1100 cells even when sparsely filled.
+# Truncation is silent to the model - it interprets the fragment it was given
+# with no way to know the rest existed - so the dump says when it has happened.
+MAX_CELLS_PER_SHEET = 900
+MAX_MERGES_PER_SHEET = 120
+
+
 def file_hash(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()[:16]
 
@@ -99,8 +138,20 @@ def cached_parse(path, plant=None):
     return None
 
 
-def convert_now(path):
-    """Convert a file with no cached parse, using inspect_parse's settings."""
+def convert_now(path, plant=None):
+    """Convert a file with no cached parse, and write the parse to the cache.
+
+    Caching the result is what makes parsed/ a cache rather than something
+    inspect_parse.py happens to leave behind. A scanned manual costs minutes to
+    convert, and paying that again on every ingest of the same unchanged file
+    is the kind of waste that never announces itself - it just looks like the
+    pipeline being slow.
+
+    Keyed by file stem, matching inspect_parse.py so the two share one cache
+    rather than each keeping its own. Two different files with the same stem
+    inside one plant would collide; keying on content hash would close that,
+    at the cost of a cache directory no human can browse by name.
+    """
     from types import SimpleNamespace
 
     sys.path.insert(0, str(ROOT / "scripts"))
@@ -109,7 +160,14 @@ def convert_now(path):
     args = SimpleNamespace(no_ocr=False, table_mode="accurate", no_cell_matching=False)
     converter = inspect_parse.build_converter(args)
     result = converter.convert(str(path))
-    return result.document.export_to_dict()
+    doc = result.document.export_to_dict()
+
+    cache = plant_paths.parsed_dir(plant)
+    cache.mkdir(parents=True, exist_ok=True)
+    (cache / (Path(path).stem + ".json")).write_text(
+        json.dumps(doc), encoding="utf-8"
+    )
+    return doc
 
 
 def page_of(item):
@@ -201,7 +259,7 @@ def extract_document(path, plant=None):
     doc = cached_parse(path, plant)
     from_cache = doc is not None
     if doc is None:
-        doc = convert_now(path)
+        doc = convert_now(path, plant)
 
     parts = []
     current = None
@@ -296,8 +354,57 @@ def extract_document(path, plant=None):
 # Spreadsheets and CSV
 # --------------------------------------------------------------------------
 
+def render_sheet(ws_values, ws_formulas):
+    """Structural dump of one sheet, values annotated with their formulas.
+
+    Deliberately not logs/convert.py's renderer, which loads the workbook with
+    data_only=True and therefore sees only cached results. That is right for
+    writing a converter - it needs the shape and the data - and wrong here: on
+    a calculation sheet the formula IS the durable knowledge, and a cell
+    holding the CT equation arrives as `22.994` with the equation invisible.
+    No prompt can recover what was never sent.
+
+    So both views are read and rendered together:
+
+        E23: 22.994  [=+(0.353*E21)*(12.006+(EXP(2.46-(0.073*E18)+...)))]
+
+    The value shows what the sheet currently computes; the formula shows the
+    rule that produced it. The rule is what belongs in a knowledge base - it is
+    still true next month, when the value is not.
+    """
+    lines, truncated = [], False
+    for row in ws_values.iter_rows():
+        for cell in row:
+            formula = ws_formulas[cell.coordinate].value
+            has_formula = isinstance(formula, str) and formula.startswith("=")
+            if cell.value is None and not has_formula:
+                continue
+            if len(lines) >= MAX_CELLS_PER_SHEET:
+                truncated = True
+                break
+
+            value = cell.value
+            if isinstance(value, str) and len(value) > 200:
+                value = value[:200] + "..."
+            rendered = f"{cell.coordinate}: {value!r}"
+            if has_formula:
+                rendered += f"  [{formula[:300]}]"
+            lines.append(rendered)
+        if truncated:
+            break
+
+    merges = [str(r) for r in ws_values.merged_cells.ranges]
+    head = [
+        f"DIMENSIONS: {ws_values.max_row} rows x {ws_values.max_column} columns",
+        "MERGED RANGES: " + (", ".join(merges[:MAX_MERGES_PER_SHEET]) or "none"),
+        f"CELLS{' (TRUNCATED)' if truncated else ''} "
+        "- a value in quotes, its formula in brackets where it has one:",
+    ]
+    return "\n".join(head + lines)
+
+
 def extract_workbook(path, plant=None):
-    """One part per sheet, carrying the structural dump logs/convert.py sends.
+    """One part per sheet: cell values, merged ranges, and formulas.
 
     Whether a sheet is a log grid or a calculation sheet is left to the model:
     that is the one routing call in this pipeline that genuinely needs
@@ -307,9 +414,11 @@ def extract_workbook(path, plant=None):
     """
     from openpyxl import load_workbook
 
-    from logs.convert import render_sheet
-
+    # Twice, because openpyxl gives one view or the other and never both: the
+    # cached results, or the formulas that produced them.
     wb = load_workbook(path, data_only=True)
+    wb_formulas = load_workbook(path, data_only=False)
+
     parts = []
     for i, name in enumerate(wb.sheetnames, 1):
         parts.append(Part(
@@ -317,7 +426,7 @@ def extract_workbook(path, plant=None):
             kind="table",  # provisional; the model may reclassify it as `log`
             locator=f"sheet {name!r}",
             title=name,
-            text=render_sheet(wb[name]),
+            text=render_sheet(wb[name], wb_formulas[name]),
         ))
     source_chars = sum(
         len(str(c.value)) for name in wb.sheetnames
@@ -364,3 +473,71 @@ def extract(path, plant=None):
 
 def encode_image(png_bytes):
     return base64.standard_b64encode(png_bytes).decode("ascii")
+
+
+def coarsen(parts):
+    """Merge consecutive sections into chapter-sized blocks. Drops nothing.
+
+    Used for documents over COARSE_CHARS, where a description per section costs
+    more than the rest of the corpus combined. Consecutive sections are merged
+    until CHAPTER_CHARS, and the merged block keeps every heading it swallowed
+    in its title and spans their pages in its locator - so "sludge dewatering,
+    pages 210-260" is still findable, just not broken into forty entries.
+
+    Tables and formulas pass through untouched: they are already the unit
+    someone asks for, and there are few enough of them to describe individually.
+    Figures are handled by the caller, which records them without describing
+    them rather than paying for 218 photographs of valve galleries.
+
+    Merging by size rather than by heading level is deliberate. Heading levels
+    would be the better key when a document has them, but a scanned manual
+    parses as 1285 level-1 headings - no hierarchy at all - and a rule that
+    silently does nothing on the exact documents it exists for is worse than
+    one that always works a little crudely.
+    """
+    out, buffer = [], []
+
+    def flush():
+        if not buffer:
+            return
+        if len(buffer) == 1:
+            out.append(buffer[0])
+            buffer.clear()
+            return
+
+        headings = [p.title for p in buffer if p.title]
+        title = " | ".join(headings[:CHAPTER_HEADINGS])
+        if len(headings) > CHAPTER_HEADINGS:
+            title += f" | (+{len(headings) - CHAPTER_HEADINGS} more headings)"
+
+        pages = [p.page_start for p in buffer if p.page_start]
+        pages += [p.page_end for p in buffer if p.page_end]
+        start, end = (min(pages), max(pages)) if pages else (None, None)
+
+        merged = Part(
+            component_id=buffer[0].component_id,
+            kind="section",
+            locator=(
+                f"pages {start}-{end}" if start and end and end != start
+                else (f"page {start}" if start else "")
+            ),
+            title=title,
+            text="\n\n".join(p.text for p in buffer if p.text),
+            page_start=start,
+            page_end=end,
+        )
+        out.append(merged)
+        buffer.clear()
+
+    for part in parts:
+        if part.kind != "section":
+            flush()
+            if part.kind == "table" and len(part.text) > TABLE_PREVIEW_CHARS:
+                part.text = part.text[:TABLE_PREVIEW_CHARS] + "\n... (table continues)"
+            out.append(part)
+            continue
+        buffer.append(part)
+        if sum(len(p.text) + len(p.title) for p in buffer) >= CHAPTER_CHARS:
+            flush()
+    flush()
+    return out

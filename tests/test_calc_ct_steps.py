@@ -92,12 +92,12 @@ assert isinstance(dispatched, ToolResult)
 assert dispatched.trace["result"]["ct_actual"] == 22.2
 print("dispatch returns the summary string with .trace attached")
 
-# 6. A tool that still returns a plain string is untouched by the unwrapping.
-#    Retrievals and lookups have no trace, and dispatch must not invent one.
-plain = dispatch("search_manuals", {"query": "actuator torque"})
-assert isinstance(plain, str)
-assert not isinstance(plain, ToolResult), "string tools should pass straight through"
-print("plain-string tools pass through unchanged")
+# 6. A tool returning a plain string should be untouched by the unwrapping.
+#    Not checked here any more: every registered tool is a calculator returning
+#    a ToolResult, so there is nothing left to exercise this path. The fixture
+#    retrievals and lookups that used to cover it were pseudocode from the
+#    start of the repo and are gone. Restore this when a real retrieval tool is
+#    registered - the dispatch behaviour it guards still exists.
 
 # 7. Every calculator follows the shape documented in tools/calculators/__init__.py.
 #    This is a convention rather than an enforced contract, so it is checked here.

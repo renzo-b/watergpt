@@ -38,6 +38,24 @@ from pydantic import BaseModel, Field
 Kind = Literal["section", "table", "image", "formula", "log"]
 
 
+class Statement(BaseModel):
+    """One piece of durable knowledge read off a calculation sheet.
+
+    The durable/instance split is the whole point. An equation, a variable
+    definition, a fixed plant dimension, a threshold or a decision rule is
+    knowledge: still true next month, and worth carrying into context. The
+    number sitting in an input cell today is one run of the sheet - indexing
+    it is how a system starts confidently reporting last Tuesday's clearwell
+    temperature as a plant fact.
+
+    `cells` is what makes a statement checkable. Verifying one is then reading
+    the cell it came from, rather than re-deriving the sheet.
+    """
+
+    text: str
+    cells: str = ""  # e.g. "E23", or "E18:E21" for a definition block
+
+
 class Component(BaseModel):
     """One addressable part of a document."""
 
@@ -72,6 +90,18 @@ class Component(BaseModel):
     # question, while a dropped section that mattered is a question that can
     # never be answered and leaves no error behind to explain why.
     indexed: bool = True
+
+    # Durable knowledge extracted from a calculation sheet: the equations,
+    # variable definitions and decision rules that live in its formulas. Empty
+    # for everything else.
+    #
+    # These are the one place the "describe, never restate" rule is suspended,
+    # and deliberately so. For prose that rule is right - a description that
+    # quotes setpoints becomes a second, staler copy of the document. But a
+    # spreadsheet's formulas ARE its content, they do not go stale, and a
+    # description saying "contains the CT equations" routes a question to a
+    # sheet that then cannot answer it.
+    statements: list[Statement] = Field(default_factory=list)
 
     # ---- content: present when short enough to carry, else fetched ----
     # Set for a document the pipeline chose to carry verbatim. When None, the
@@ -145,6 +175,8 @@ class DocEntry(BaseModel):
                 if c.title:
                     head += f" {c.title}"
                 lines.append(head)
+                for st in c.statements:
+                    lines.append(f"    {st.text}" + (f"  ({st.cells})" if st.cells else ""))
                 if c.content:
                     lines += [f"    {ln}" for ln in c.content.splitlines() if ln.strip()]
                 elif c.description:
@@ -161,6 +193,8 @@ class DocEntry(BaseModel):
             lines.append(head)
             if c.description:
                 lines.append(f"    {c.description}")
+            for st in c.statements:
+                lines.append(f"    - {st.text}" + (f"  ({st.cells})" if st.cells else ""))
         failed = [c for c in self.components if c.status != "ok"]
         if failed:
             lines.append(

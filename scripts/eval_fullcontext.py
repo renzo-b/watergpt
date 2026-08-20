@@ -106,98 +106,40 @@ Source = namedtuple("Source", "document location")
 # --------------------------------------------------------------------------
 
 
-def document_text(doc):
-    """Page-delimited text for one parsed document.
+def assemble(client, plant, max_doc, max_total, log):
+    """Build the context payload from the ingest catalogue. Returns (text, included, excluded).
 
-    Page markers are what make a citation checkable. Without them the model can
-    name a document but not a page, and every case would collapse to the
-    document-only column.
+    The corpus is no longer re-derived from docling parses here. ingest/ already
+    decomposed every uploaded file, decided per document whether to carry it
+    verbatim or as descriptions, and wrote the result to the plant manifest -
+    so this reads that and stops. Two implementations of "what does the model
+    see" would drift, and the catalogue is the one the product will ship.
+
+    The per-document token caps stay. They are the boundary between the two
+    strategies: a document too large to carry is the case for retrieval, and
+    excluding it here by a property of the document keeps that decision
+    explainable rather than an artefact of corpus ordering.
     """
-    from docling_core.types.doc.document import TableItem
-
-    pages = {}
-    for item, _level in doc.iterate_items():
-        prov = getattr(item, "prov", None)
-        page = prov[0].page_no if prov else 0
-        text = (
-            item.export_to_markdown(doc=doc)
-            if isinstance(item, TableItem)
-            else (getattr(item, "text", "") or "")
-        )
-        if text.strip():
-            pages.setdefault(page, []).append(text.strip())
-
-    from rag import clean
-
-    parts = []
-    for page in sorted(pages):
-        parts.append(f"[p.{page}]")
-        parts.append(clean.normalise("\n".join(pages[page])))
-    return "\n".join(parts)
-
-
-def interpreted_text(interp_dir, workbooks, log):
-    """Durable spreadsheet statements, same source the RAG path uses."""
-    import build_index
-
-    blocks, unmatched = [], []
-    for json_path in sorted(Path(interp_dir).glob("*.json")):
-        path, sheet = build_index.resolve_sheet(workbooks, json_path.stem)
-        if path is None:
-            unmatched.append(json_path.stem)
-            continue
-        result = json.loads(json_path.read_text(encoding="utf-8"))
-        lines = [
-            f"- {item['statement']}  ({build_index.statement_location(sheet, item.get('source_cells'))})"
-            for item in result.get("durable", [])
-        ]
-        if lines:
-            blocks.append(f"DOCUMENT: {path.name}\n[sheet '{sheet}']\n" + "\n".join(lines))
-    if unmatched:
-        # A sheet case that scores zero because its workbook is not in --input
-        # looks exactly like a sheet case the model got wrong. build_index
-        # reports this condition; so does this.
-        log(f"  {len(unmatched)} interpretation file(s) belong to workbooks "
-            f"outside --input and were skipped: {', '.join(unmatched[:3])}"
-            + (" ..." if len(unmatched) > 3 else ""))
-    return blocks
-
-
-def count_tokens(client, text):
-    return client.messages.count_tokens(
-        model=MODEL, messages=[{"role": "user", "content": text or "."}]
-    ).input_tokens
-
-
-def assemble(client, input_dir, parsed_dir, interp_dir, max_doc, max_total, log):
-    """Build the context payload. Returns (text, included, excluded)."""
-    from docling_core.types.doc import DoclingDocument
+    from ingest import read_manifest
 
     blocks, included, excluded = [], [], []
-    for pdf in sorted(Path(input_dir).iterdir()):
-        if pdf.suffix.lower() not in {".pdf", ".docx"}:
+    for entry in sorted(read_manifest(plant), key=lambda e: e.file_path):
+        name = Path(entry.file_path).name
+        if entry.status != "ingested":
+            excluded.append((name, None, entry.error or "not ingested"))
             continue
-        cached = Path(parsed_dir) / f"{pdf.stem}.json"
-        if not cached.is_file():
-            excluded.append((pdf.name, None, "not parsed - run inspect_parse.py"))
-            continue
-        doc = DoclingDocument.model_validate_json(cached.read_text(encoding="utf-8"))
-        body = document_text(doc)
-        tokens = count_tokens(client, body)
-        if tokens > max_doc:
-            excluded.append((pdf.name, tokens, f"over --max-doc-tokens ({max_doc:,})"))
-            continue
-        included.append((pdf.name, tokens))
-        blocks.append(f"DOCUMENT: {pdf.name}\n{body}")
 
-    workbooks = [
-        p
-        for p in Path(input_dir).iterdir()
-        if p.suffix.lower() in {".xlsx", ".xlsm"}
-    ]
-    for block in interpreted_text(interp_dir, workbooks, log):
-        name = block.splitlines()[0].removeprefix("DOCUMENT: ")
-        included.append((name, count_tokens(client, block)))
+        # The matcher compares on filename, and SYSTEM_INSTRUCTIONS tells the
+        # model to cite the DOCUMENT: line, so the catalogue's own "document:
+        # <full path>" header is replaced with the bare filename.
+        body = entry.catalogue_entry().split("\n", 1)[1]
+        block = f"DOCUMENT: {name}\n{body}"
+
+        tokens = count_tokens(client, block)
+        if tokens > max_doc:
+            excluded.append((name, tokens, f"over --max-doc-tokens ({max_doc:,})"))
+            continue
+        included.append((name, tokens))
         blocks.append(block)
 
     text = "\n\n".join(blocks)
@@ -219,6 +161,12 @@ def assemble(client, input_dir, parsed_dir, interp_dir, max_doc, max_total, log)
             "exclude the outsized documents, or raise --max-tokens deliberately."
         )
     return text, included, excluded
+
+
+def count_tokens(client, text):
+    return client.messages.count_tokens(
+        model=MODEL, messages=[{"role": "user", "content": text or "."}]
+    ).input_tokens
 
 
 # --------------------------------------------------------------------------
@@ -250,12 +198,9 @@ def main():
     parser = argparse.ArgumentParser(
         description="Answer retrieval_set.yaml with the whole corpus in context."
     )
-    parser.add_argument("--input", type=Path, default=ROOT / "documents" / "retrieval_test")
-    parser.add_argument("--parsed-dir", type=Path,
-                        default=plant_paths.parsed_dir())
-    parser.add_argument("--interp-dir", type=Path, default=ROOT / "data" / "interp")
     parser.add_argument("--set", type=Path, default=ROOT / "evals" / "retrieval_set.yaml")
-    parser.add_argument("--plant-id", default="demo", help="recorded in the report only")
+    parser.add_argument("--plant-id", default=plant_paths.DEFAULT_PLANT,
+                        help="which plant's catalogue to answer from")
     parser.add_argument("--max-doc-tokens", type=int, default=DEFAULT_MAX_DOC_TOKENS)
     parser.add_argument("--max-tokens", type=int, default=DEFAULT_MAX_TOTAL_TOKENS)
     parser.add_argument("--effort", default="medium",
@@ -277,8 +222,7 @@ def main():
         print(line, flush=True)
 
     corpus, included, excluded = assemble(
-        client, args.input, args.parsed_dir, args.interp_dir,
-        args.max_doc_tokens, args.max_tokens, log,
+        client, args.plant_id, args.max_doc_tokens, args.max_tokens, log,
     )
 
     if args.dump_context:

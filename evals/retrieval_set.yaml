@@ -32,7 +32,7 @@
       location: page 1
     contains:
       - 0.2
-      - 0.1
+      - 1.0
       - mg/L
   notes: >
     returns the exact dosage listed in the document

@@ -3,6 +3,7 @@
     from ingest import catalogue, read_manifest
 
     catalogue()        -> every ingested document, described, for context
+    dump_catalogue()   -> the same, written to a file you can read
     read_manifest()    -> the full DocEntry records behind it
 
 Ingestion is a separate step and lives in ingest.pipeline, which is a CLI:
@@ -20,13 +21,14 @@ __all__ = [
     "Component",
     "DocEntry",
     "catalogue",
+    "dump_catalogue",
     "ingest_file",
     "read_manifest",
 ]
 
 
 def __getattr__(name):
-    if name in ("catalogue", "ingest_file", "read_manifest"):
+    if name in ("catalogue", "dump_catalogue", "ingest_file", "read_manifest"):
         from ingest import pipeline
 
         return getattr(pipeline, name)

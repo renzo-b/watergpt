@@ -21,14 +21,14 @@ from logs.schema import validate_frame  # noqa: E402
 
 WB = (
     Path(__file__).resolve().parent.parent
-    / "documents" / "retrieval_test"
+    / "documents" / "test"
     / "DWQMS-Drinking-Water-System-Record-Template.xlsx"
 )
 
 entries = read_manifest()
 if not entries:
     print("test_logs: SKIPPED - no manifest. Run: python -m logs.convert --input "
-          "documents/retrieval_test/DWQMS-Drinking-Water-System-Record-Template.xlsx")
+          "documents/test/DWQMS-Drinking-Water-System-Record-Template.xlsx")
     raise SystemExit(0)
 
 converted = {e.sheet_name: e for e in entries if e.status == "converted"}
@@ -44,7 +44,15 @@ for sheet, expected in MONTHS.items():
 
 # 2. Reading a log touches parquet only — no model call, no exec, no openpyxl.
 jan = load_log("Jan.")
-assert isinstance(jan, pd.DataFrame) and jan.shape == (31, 127), jan.shape
+# Rows are pinned because January has 31 days whatever the converter does.
+# Columns are not: the converter is rewritten by the model on every conversion,
+# and how it joins a multi-row header ("Flows | Raw Water | Meter Reading" as
+# one column or three) legitimately shifts the count - it has been 127 and 133
+# across two runs of the same workbook. Pinning it makes re-converting the
+# corpus fail a test that is not measuring anything about correctness.
+assert isinstance(jan, pd.DataFrame), type(jan)
+assert jan.shape[0] == 31, jan.shape
+assert jan.shape[1] > 50, jan.shape
 assert isinstance(jan.index, pd.DatetimeIndex) and jan.index.name == "date"
 
 # 3. Column names are unique and carry the level above them. Six columns on this

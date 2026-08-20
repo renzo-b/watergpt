@@ -84,6 +84,21 @@ read again on every future question. Describe it briefly and mark it not \
 indexed. Anything carrying process, equipment, regulatory or procedural \
 content is worth indexing, and if you are unsure, index it.
 - For a formula, say what it computes and what its variables mean.
+- For a spreadsheet sheet that is NOT a log, also extract its durable \
+knowledge as statements. This is the one case where you state content \
+rather than describe it, because a spreadsheet's formulas ARE its content: \
+they do not go stale, and "contains the CT equations" routes a question to \
+a sheet that then cannot answer it. Cell values are shown with their \
+formula in brackets where they have one - read the formula, not the number \
+it currently produces. Write one statement for each equation (give it in \
+full, with cell references resolved to the variable names defined on the \
+sheet), each variable definition, each fixed plant dimension or capacity, \
+each threshold, and each decision rule the sheet encodes. Name the cells \
+each came from. Do NOT write a statement for a value that is one run of \
+the sheet - today's measured temperature or residual in an input cell is \
+an instance, not knowledge, and indexing it is how a system starts \
+reporting last Tuesday as a plant fact. Leave statements empty for every \
+other kind of part.
 - For a spreadsheet sheet, decide what it IS. A sheet of dated observations \
 recorded over and over - a monthly record grid, a daily operating log - is a \
 "log". A sheet of equations, design parameters, lookup values or a filled-in \
@@ -151,6 +166,37 @@ def component_schema(allow_verbatim):
                                 "values, no statistics."
                             ),
                         },
+                        "statements": {
+                            "type": "array",
+                            "description": (
+                                "Durable knowledge for a non-log spreadsheet "
+                                "sheet: equations in full, variable "
+                                "definitions, fixed dimensions, thresholds, "
+                                "decision rules. Empty for everything else, "
+                                "and for values that are one run of a sheet."
+                            ),
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "text": {
+                                        "type": "string",
+                                        "description": (
+                                            "One self-contained statement, "
+                                            "readable on its own."
+                                        ),
+                                    },
+                                    "cells": {
+                                        "type": "string",
+                                        "description": (
+                                            "Cell or range it came from, "
+                                            "e.g. 'E23' or 'E18:E21'."
+                                        ),
+                                    },
+                                },
+                                "required": ["text", "cells"],
+                                "additionalProperties": False,
+                            },
+                        },
                         "indexed": {
                             "type": "boolean",
                             "description": (
@@ -161,7 +207,8 @@ def component_schema(allow_verbatim):
                             ),
                         },
                     },
-                    "required": ["component_id", "kind", "description", "indexed"],
+                    "required": ["component_id", "kind", "description", "indexed",
+                                 "statements"],
                     "additionalProperties": False,
                 },
             },
