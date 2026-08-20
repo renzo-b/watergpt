@@ -47,34 +47,74 @@ if str(ROOT) not in sys.path:
 import plant as plant_paths  # noqa: E402
 from eval_retrieval import alternatives, load_cases, matches  # noqa: E402
 
-MODEL = "claude-opus-5"
+# The model to answer with defaults to whatever agent.py ships, imported
+# rather than repeated so the two cannot drift. Measuring one model while
+# shipping another is the quietest way for an eval to stop meaning anything:
+# a catalogue a stronger model routes correctly may not be enough for the
+# model actually answering users.
+from agent import MODEL as DEFAULT_MODEL  # noqa: E402
 
-# Claude Opus 5 list price, dollars per million tokens. Cache writes cost 1.25x
-# input and reads 0.1x; both are reported because the write is a one-off and
-# the read is what a real session would pay per turn.
-PRICE_IN, PRICE_OUT = 5.0, 25.0
+# List price, dollars per million tokens, per model. Kept as a table rather
+# than two constants because the cost line is only honest if it tracks the
+# model actually used - a hardcoded Opus price under a Sonnet run reports a
+# number that is wrong by nearly half and says so with total confidence.
+PRICES = {
+    "claude-opus-5": (5.00, 25.00),
+    "claude-opus-4-8": (5.00, 25.00),
+    "claude-sonnet-5": (3.00, 15.00),   # $2/$10 introductory through 2026-08-31
+    "claude-sonnet-4-6": (3.00, 15.00),
+    "claude-sonnet-4-5": (3.00, 15.00),
+    "claude-haiku-4-5": (1.00, 5.00),
+}
 
-# A document larger than this is the case full context is NOT for. Excluding by
-# a property of the document rather than by corpus ordering keeps the decision
-# explainable: Rutledge is out because it is 635k tokens, not because it sorted
-# late. This is the boundary between the two strategies, so it is a flag.
+# Cache writes cost 1.25x input and reads 0.1x. Both are reported because the
+# write is a one-off per run and the read is what a real session pays per turn.
+CACHE_WRITE, CACHE_READ = 1.25, 0.1
+
+
+def prices(model):
+    if model not in PRICES:
+        raise SystemExit(
+            f"no price on file for {model!r}. Add it to PRICES rather than "
+            "letting the run report a cost computed from another model's rates."
+        )
+    return PRICES[model]
+
+
 DEFAULT_MAX_DOC_TOKENS = 120_000
 DEFAULT_MAX_TOTAL_TOKENS = 200_000
 
+# Fetch turns allowed per case. A question may legitimately need two or
+# three - locate a chapter, then narrow a truncated range - but a model
+# looping on fetches is not converging and should be cut off rather than
+# billed indefinitely.
+MAX_TOOL_TURNS = 6
+
 SYSTEM_INSTRUCTIONS = """\
-You are answering questions from a water treatment plant's own documents, which \
-are supplied in full below. Every document is delimited by a DOCUMENT: line. \
-Pages within a document are marked [p.N]. A spreadsheet has no pages: its \
-statements are grouped under a [sheet 'NAME'] marker instead.
+You are answering questions from a water treatment plant's own documents, \
+catalogued below. Every document is delimited by a DOCUMENT: line followed \
+by an `about:` summary of what it covers.
 
-Answer only from these documents. Report the source as the exact filename from \
-the DOCUMENT: line and the location as the marker containing the text you used, \
-copied verbatim - p.4 for a page, sheet 'CT' for a spreadsheet, quotes included.
+A short document is given in full under `full text follows, with locators:`. \
+A long one is given as `contents:` - one line per part, each a location and \
+a DESCRIPTION of what is there rather than the text itself. A description \
+tells you where to look; it is not the source and cannot be quoted from.
 
-If the documents do not contain the answer, set found to false and say so in the \
-answer field. Do not infer a plausible answer from general water treatment \
-knowledge - a confident answer that is not in these documents is the failure \
-this is checking for."""
+Use fetch_document_part to read the actual contents of any part you were \
+only given a description of. Pass the filename from the DOCUMENT: line and \
+a location copied from the catalogue. Answering a question about a long \
+document without fetching means answering from a summary, which is the \
+failure this is checking for.
+
+Locations are written [page N], [pages N-M], or [sheet 'NAME'] for a \
+spreadsheet. Report the source as the exact filename and the location as \
+the marker containing the text you used, copied verbatim without the \
+brackets - for a range you fetched inside, cite the page the answer was on.
+
+Answer only from these documents. If they do not contain the answer, set \
+found to false and say so. Do not infer a plausible answer from general \
+water treatment knowledge - a confident answer that is not in these \
+documents is the failure this is checking for."""
 
 ANSWER_SCHEMA = {
     "type": "object",
@@ -106,7 +146,7 @@ Source = namedtuple("Source", "document location")
 # --------------------------------------------------------------------------
 
 
-def assemble(client, plant, max_doc, max_total, log):
+def assemble(client, plant, max_doc, max_total, log, terse=True):
     """Build the context payload from the ingest catalogue. Returns (text, included, excluded).
 
     The corpus is no longer re-derived from docling parses here. ingest/ already
@@ -132,7 +172,7 @@ def assemble(client, plant, max_doc, max_total, log):
         # The matcher compares on filename, and SYSTEM_INSTRUCTIONS tells the
         # model to cite the DOCUMENT: line, so the catalogue's own "document:
         # <full path>" header is replaced with the bare filename.
-        body = entry.catalogue_entry().split("\n", 1)[1]
+        body = entry.catalogue_entry(terse).split("\n", 1)[1]
         block = f"DOCUMENT: {name}\n{body}"
 
         tokens = count_tokens(client, block)
@@ -172,26 +212,86 @@ def count_tokens(client, text):
 # --------------------------------------------------------------------------
 
 
-def ask(client, corpus, question, effort, max_tokens):
-    response = client.messages.create(
-        model=MODEL,
-        max_tokens=max_tokens,
-        output_config={
-            "effort": effort,
-            "format": {"type": "json_schema", "schema": ANSWER_SCHEMA},
-        },
-        system=[
-            {"type": "text", "text": SYSTEM_INSTRUCTIONS},
-            # The corpus is the cached prefix: stable across every case, so it
-            # is written once and read at a tenth of the price thereafter.
-            {"type": "text", "text": corpus, "cache_control": {"type": "ephemeral"}},
-        ],
-        messages=[{"role": "user", "content": question}],
-    )
-    if response.stop_reason == "refusal":
-        return None, response.usage
-    text = next((b.text for b in response.content if b.type == "text"), "")
-    return json.loads(text), response.usage
+class Usage:
+    """Usage summed across the turns of one case's tool loop."""
+
+    def __init__(self):
+        self.cache_creation_input_tokens = 0
+        self.cache_read_input_tokens = 0
+        self.input_tokens = 0
+        self.output_tokens = 0
+
+    def add(self, u):
+        self.cache_creation_input_tokens += u.cache_creation_input_tokens or 0
+        self.cache_read_input_tokens += u.cache_read_input_tokens or 0
+        self.input_tokens += u.input_tokens or 0
+        self.output_tokens += u.output_tokens or 0
+        return self
+
+
+def ask(client, corpus, question, effort, max_tokens, plant_id, log):
+    """Answer one case, letting the model fetch document parts as it goes.
+
+    The catalogue in the system prompt says what exists and where; it does not
+    carry the text of a long document. Without a fetch tool the model can only
+    answer such a question from a description, which is the failure this
+    harness is supposed to detect rather than encode. So the tool is offered
+    and the calls it makes are recorded - a case that passes without fetching
+    was answerable from the catalogue alone, and that is worth knowing
+    separately from a case that needed the source.
+    """
+    import tools as tool_pkg
+    from tools.registry import dispatch
+
+    schemas = [s for s in tool_pkg.TOOL_SCHEMAS if s["name"] == "fetch_document_part"]
+    messages = [{"role": "user", "content": question}]
+    usage = Usage()
+    fetched = []
+
+    for _ in range(MAX_TOOL_TURNS):
+        response = client.messages.create(
+            model=MODEL,
+            max_tokens=max_tokens,
+            tools=schemas,
+            output_config={
+                "effort": effort,
+                "format": {"type": "json_schema", "schema": ANSWER_SCHEMA},
+            },
+            system=[
+                {"type": "text", "text": SYSTEM_INSTRUCTIONS},
+                # The corpus is the cached prefix: stable across every case, so
+                # it is written once and read at a tenth of the price after.
+                {"type": "text", "text": corpus,
+                 "cache_control": {"type": "ephemeral"}},
+            ],
+            messages=messages,
+        )
+        usage.add(response.usage)
+
+        if response.stop_reason == "refusal":
+            return None, usage, fetched
+        if response.stop_reason != "tool_use":
+            text = next((b.text for b in response.content if b.type == "text"), "")
+            return (json.loads(text) if text else None), usage, fetched
+
+        messages.append({"role": "assistant", "content": response.content})
+        results = []
+        for block in response.content:
+            if block.type != "tool_use":
+                continue
+            fetched.append(
+                f"{block.input.get('document', '?')} @ {block.input.get('locator', '?')}"
+            )
+            out = dispatch(block.name, block.input, plant_id=plant_id)
+            results.append({
+                "type": "tool_result",
+                "tool_use_id": block.id,
+                "content": str(out),
+            })
+        messages.append({"role": "user", "content": results})
+
+    log(f"    tool loop hit {MAX_TOOL_TURNS} turns without a final answer")
+    return None, usage, fetched
 
 
 def main():
@@ -203,6 +303,9 @@ def main():
                         help="which plant's catalogue to answer from")
     parser.add_argument("--max-doc-tokens", type=int, default=DEFAULT_MAX_DOC_TOKENS)
     parser.add_argument("--max-tokens", type=int, default=DEFAULT_MAX_TOTAL_TOKENS)
+    parser.add_argument("--full-catalogue", action="store_true",
+                        help="render every component description, not "
+                             "just those of untitled parts (~50%% more tokens)")
     parser.add_argument("--effort", default="medium",
                         choices=("low", "medium", "high", "xhigh", "max"))
     parser.add_argument("--answer-tokens", type=int, default=8000)
@@ -223,6 +326,7 @@ def main():
 
     corpus, included, excluded = assemble(
         client, args.plant_id, args.max_doc_tokens, args.max_tokens, log,
+        terse=not args.full_catalogue,
     )
 
     if args.dump_context:
@@ -245,8 +349,10 @@ def main():
     results = []
     cache_write = cache_read = plain_in = out_tokens = 0
     for case in cases:
-        parsed, usage = ask(client, corpus, case["question"].strip(),
-                            args.effort, args.answer_tokens)
+        parsed, usage, fetched = ask(
+            client, corpus, case["question"].strip(),
+            args.effort, args.answer_tokens, args.plant_id, log,
+        )
         cache_write += usage.cache_creation_input_tokens or 0
         cache_read += usage.cache_read_input_tokens or 0
         plain_in += usage.input_tokens or 0
@@ -270,7 +376,8 @@ def main():
             note = "" if not missing else f"missing {missing}"
 
         results.append({"case": case, "parsed": parsed, "cited": cited,
-                        "contains_ok": contains_ok, "note": note})
+                        "contains_ok": contains_ok, "note": note,
+                        "fetched": fetched})
         mark = "PASS" if cited else "FAIL"
         got = f"{parsed['document']} @ {parsed['location']}" if parsed else "-"
         log(f"  {mark}  {case['id']:24s} -> {got[:58]}  {note}")

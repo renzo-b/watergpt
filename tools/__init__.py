@@ -14,7 +14,7 @@ from tools.registry import all_schemas, dispatch  # noqa: F401  (re-exported)
 
 # Side-effect imports: loading these modules runs each @tool decorator, which is
 # what populates the registry. Order here is the order tools appear to the model.
-from . import calculators  # noqa: F401,E402
+from . import documents, calculators  # noqa: F401,E402
 
 # The list passed as `tools=` on every model call.
 TOOL_SCHEMAS = all_schemas()

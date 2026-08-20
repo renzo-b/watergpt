@@ -103,3 +103,172 @@
   notes: >
     Interpreted-spreadsheet path. Scores branch selection from durable
     statements, not arithmetic on a stored value.
+
+# ---------------------------------------------------------------------------
+# Cases below were added once the ingest/ pipeline replaced the hand-assembled
+# corpus. They cover the paths the original seven never touched: a coarsened
+# document, a converted log sheet, and a question the corpus cannot answer.
+# ---------------------------------------------------------------------------
+
+- id: manual_uv_disinfection
+  type: open_ended
+  question: where in the O&M manual is the UV disinfection equipment described?
+  expects:
+    # Coarsened-document path. Rutledge is over the size threshold, so its
+    # sections are merged into chapter-sized blocks and only their descriptions
+    # reach context. This scores ROUTING - can the model name the document and
+    # the page range - not recall of anything printed on those pages.
+    source:
+      - document: Rutledge Creek WWTP O&M Manual 2007-01.pdf
+        location: pages 93-103
+      - document: Rutledge Creek WWTP O&M Manual 2007-01.pdf
+        location: pages 342-346
+    contains:
+      - "ultraviolet"
+  notes: >
+    First case to exercise the coarse tier. A page-range locator cannot satisfy
+    a case expecting a single page, so the expectation is written as the range
+    the catalogue actually carries.
+
+- id: manual_septage
+  type: open_ended
+  question: does the wastewater plant accept hauled septage, and where would I read about it?
+  expects:
+    source:
+      - document: Rutledge Creek WWTP O&M Manual 2007-01.pdf
+        location: pages 422-426
+      - document: Rutledge Creek WWTP O&M Manual 2007-01.pdf
+        location: pages 114-125
+      - document: Rutledge Creek WWTP O&M Manual 2007-01.pdf
+        location: pages 450-454
+    contains:
+      - "septage"
+  notes: >
+    Septage is discussed in the receiving-station chapter, the hauled-waste
+    policy and the blank manifest forms. Any of the three is a correct route,
+    which is why the source is a list.
+
+- id: log_january_coverage
+  type: open_ended
+  question: do we have daily operating log data for January, and what does it record?
+  expects:
+    # Log path. The sheet was converted to parquet by logs/convert.py, and its
+    # catalogue line carries the pandas-computed date range and row count -
+    # facts the model was forbidden from guessing.
+    source:
+      - document: DWQMS-Drinking-Water-System-Record-Template.xlsx
+        location: "sheet 'Jan.'"
+    contains:
+      - "turbidity"
+  notes: >
+    Scores whether a converted log sheet is findable from the catalogue. It
+    does NOT score reading the dataframe - that needs the fetch tool.
+
+- id: absent_scada_ip
+  type: exact_value
+  question: what is the IP address of our SCADA server?
+  expects:
+    # Negative case. The harness warns when the set has none, and with good
+    # reason: every other case rewards finding something, so nothing here
+    # measures the failure that actually matters in a plant - answering
+    # confidently from general knowledge when the documents are silent.
+    source: null
+    contains:
+      - "not"
+  notes: >
+    Nothing in this corpus records network addressing. A pass is the model
+    setting found=false and saying so; any IP address in the answer is a
+    fabrication, however plausible it looks.
+
+# ---------------------------------------------------------------------------
+# Fetch-only cases. Every value below was checked to be ABSENT from the
+# catalogue and PRESENT in the source, so none of them can be answered from a
+# description. They fail unless the model calls fetch_document_part, which is
+# what makes them a test of the two-tier design rather than of the index.
+# ---------------------------------------------------------------------------
+
+- id: manual_plant_capacity
+  type: exact_value
+  question: what is the design capacity of the Rutledge Creek wastewater plant after the 2005 upgrade?
+  expects:
+    source:
+      - document: Rutledge Creek WWTP O&M Manual 2007-01.pdf
+        location: pages 288-290
+      - document: Rutledge Creek WWTP O&M Manual 2007-01.pdf
+        location: page 288
+    contains:
+      - "0.6"
+      - "MGD"
+  notes: >
+    "0.6 MGD" appears nowhere in the catalogue - the chapter description
+    mentions the 2005 upgrade without its numbers, by design. Passing requires
+    fetching pages 288-290 and reading the sentence.
+
+- id: manual_plant_location
+  type: exact_value
+  question: what street is the Rutledge Creek WWTP located on?
+  expects:
+    source:
+      - document: Rutledge Creek WWTP O&M Manual 2007-01.pdf
+        location: page 28
+      - document: Rutledge Creek WWTP O&M Manual 2007-01.pdf
+        location: pages 288-290
+      - document: Rutledge Creek WWTP O&M Manual 2007-01.pdf
+        location: page 288
+    contains:
+      - "Industrial Drive"
+  notes: >
+    A detail no summary would carry. Absent from the catalogue, printed in two
+    places: the Facility Information block on page 28 gives the full address
+    ("448 Industrial Drive"), and the general description near page 288 says
+    the plant is "at the end of Industrial Drive". Page 28 is listed first
+    because it is the better source and the one the model actually cites.
+
+    This case is why the matcher gained numeric page-span comparison. Under
+    string containment a citation of "p.28" matched an expectation of
+    "p.288-290" - a different page entirely - and the case passed for the
+    wrong reason.
+
+- id: manual_disc_filter_backwash
+  type: exact_value
+  question: at what head level does the Hydrotech disc filter start a backwash cycle?
+  expects:
+    source:
+      - document: Rutledge Creek WWTP O&M Manual 2007-01.pdf
+        location: pages 85-92
+      - document: Rutledge Creek WWTP O&M Manual 2007-01.pdf
+        location: pages 342-346
+      - document: Rutledge Creek WWTP O&M Manual 2007-01.pdf
+        location: pages 299-303
+    contains:
+      - "11.8"
+  notes: >
+    The catalogue says the backwash is "triggered by head buildup" and stops
+    there - the threshold is not in any description. Deliberately not scored on
+    the word "iron": the catalogue already names iron fouling, so a case built
+    on that would pass by paraphrasing the index back. This one cannot.
+
+    Three sources because the manual states this three times at different
+    precisions. The equipment chapter around p.88 gives 11.8 inches; the design
+    narrative near p.299 rounds it to "approximately 12 inches". The case was
+    originally written against the rounded figure and the model was marked
+    wrong for citing the exact one, which is the wrong way round - so it now
+    expects 11.8 and accepts any of the three locations.
+
+- id: log_january_turbidity
+  type: exact_value
+  question: in the January operating log, what was the highest raw water turbidity recorded?
+  expects:
+    source:
+      - document: DWQMS-Drinking-Water-System-Record-Template.xlsx
+        location: "sheet 'Jan.'"
+    contains:
+      - "0.879"
+  notes: >
+    Log path through the fetch tool, which returns the converted dataframe
+    rather than cells. No description can answer a max-of-a-column question;
+    this is the case that distinguishes reading data from reading about data.
+    Verified against the parquet: the 'Raw & Process Water Quality | Raw Water
+    | Turbidity (NTU)' column maxes at 0.879. Note the sheet has seven
+    turbidity columns - clarifiers, SAF filters and GAC contactors as well as
+    raw - so this also scores picking the right one.

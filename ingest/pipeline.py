@@ -77,11 +77,16 @@ def append_manifest(entry, plant=None):
         fh.write(entry.model_dump_json() + "\n")
 
 
-def catalogue(include_failed=False, plant=None):
-    """Every ingested document, described, for dropping into context."""
+def catalogue(include_failed=False, plant=None, terse=True):
+    """Every ingested document, described, for dropping into context.
+
+    `terse` is passed through to catalogue_entry: see there for what it drops
+    and why. It is the single biggest lever on per-question cost, because the
+    catalogue is re-read on every question asked.
+    """
     entries = sorted(read_manifest(plant), key=lambda e: e.file_path)
     blocks = [
-        e.catalogue_entry() for e in entries
+        e.catalogue_entry(terse) for e in entries
         if e.status == "ingested" or include_failed
     ]
     if not blocks:
@@ -89,7 +94,7 @@ def catalogue(include_failed=False, plant=None):
     return "\n\n---\n\n".join(blocks)
 
 
-def dump_catalogue(path=None, plant=None):
+def dump_catalogue(path=None, plant=None, terse=True):
     """Write the catalogue out so a human can read exactly what the model sees.
 
     The catalogue is assembled in memory on every question and never stored,
@@ -100,7 +105,7 @@ def dump_catalogue(path=None, plant=None):
 
     Debug output, so it goes to scratch/ rather than into the plant directory.
     """
-    text = catalogue(include_failed=True, plant=plant)
+    text = catalogue(include_failed=True, plant=plant, terse=terse)
     out = Path(path) if path else plant_paths.scratch_dir() / "catalogue.txt"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(text, encoding="utf-8")

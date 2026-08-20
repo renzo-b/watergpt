@@ -96,24 +96,57 @@ def alternatives(source):
     return list(source) if isinstance(source, list) else [source]
 
 
+def page_span(text):
+    """The (first, last) page a normalised location refers to, or None.
+
+    'p.7' -> (7, 7);  'p.93-103' -> (93, 103);  "sheet 'ct'" -> None.
+    """
+    span = re.search(r"p\.(\d+)\s*-\s*(\d+)", text)
+    if span:
+        return int(span.group(1)), int(span.group(2))
+    one = re.search(r"p\.(\d+)", text)
+    if one:
+        return int(one.group(1)), int(one.group(1))
+    return None
+
+
+def location_matches(want, got):
+    """Whether an actual location satisfies an expected one.
+
+    Two tests, because locations are written at different granularities and
+    neither spelling is wrong.
+
+    Page spans overlap numerically. An expectation of "pages 93-103" is
+    satisfied by a citation of "p.95" - the answer was found inside the range
+    the case named. String containment cannot see that ("p.95" is not a
+    substring of "p.93-103"), and it started mattering once the agent could
+    fetch a range and then cite the exact page it read: the model became more
+    precise than the expectation, and was scored wrong for it.
+
+    Everything else falls back to containment in both directions, which is what
+    makes an expected "sheet 'CT Calc'" satisfied by "sheet 'CT Calc', cells
+    C31, C33".
+    """
+    if not want or not got:
+        return False
+    a, b = page_span(want), page_span(got)
+    if a and b:
+        return a[0] <= b[1] and b[0] <= a[1]
+    return want in got or got in want
+
+
 def matches(chunk, source):
     """Return (document_matches, location_matches) for one chunk.
 
     `source` may be one expectation or several; the chunk needs to satisfy any
     one of them.
-
-    Location is a containment test in both directions on purpose. An expected
-    "sheet 'CT Calc'" should be satisfied by an actual "sheet 'CT Calc', cells
-    C31, C33", and an expected "p.7, section 4" by an actual "p.7". Requiring
-    equality would score a correct retrieval as a miss because the index writes
-    a more precise location than the case does.
     """
     any_doc = any_strict = False
     for option in alternatives(source):
         doc_ok = norm_document(chunk.document) == norm_document(option["document"])
-        want = norm_location(option["location"])
-        got = norm_location(chunk.location)
-        loc_ok = bool(want) and bool(got) and (want in got or got in want)
+        loc_ok = location_matches(
+            norm_location(option["location"]), norm_location(chunk.location)
+        )
         any_doc = any_doc or doc_ok
         any_strict = any_strict or (doc_ok and loc_ok)
     return any_doc, any_strict

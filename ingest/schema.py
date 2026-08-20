@@ -155,8 +155,15 @@ class DocEntry(BaseModel):
     # legitimately scores low.
     text_coverage: float | None = None
 
-    def catalogue_entry(self):
-        """The compact form that goes into context. Not the whole entry."""
+    def catalogue_entry(self, terse=True):
+        """The compact form that goes into context. Not the whole entry.
+
+        `terse` drops the description of any part whose title already names it,
+        which is worth about a third of the catalogue and therefore a third of
+        what every question costs to ask. Pass terse=False to render every
+        description - the manifest keeps them regardless, so this is a
+        rendering choice that can be changed back without re-ingesting.
+        """
         lines = [
             f"document: {self.file_path}",
             f"about: {self.summary}",
@@ -191,7 +198,19 @@ class DocEntry(BaseModel):
             if c.title:
                 head += f": {c.title}"
             lines.append(head)
-            if c.description:
+            # A description is only worth its tokens where nothing else says
+            # what the part is. A coarsened block already carries every heading
+            # it swallowed - "Tertiary Effluent Filter | Ultraviolet and
+            # Chlorine Disinfection | Post-aeration Facility" - and the
+            # description beneath it mostly restates them at a third of the
+            # density. Untitled parts are the opposite case: docling extracts
+            # no caption for most tables in a scan, so their description is the
+            # only thing that makes them findable, and dropping it would blind
+            # the catalogue to them entirely.
+            #
+            # Worth a third of the catalogue on this corpus, and reversible -
+            # the descriptions stay in the manifest either way.
+            if c.description and (terse is False or not c.title.strip()):
                 lines.append(f"    {c.description}")
             for st in c.statements:
                 lines.append(f"    - {st.text}" + (f"  ({st.cells})" if st.cells else ""))

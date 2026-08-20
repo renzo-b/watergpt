@@ -94,7 +94,22 @@ def run_agent(question, attachment=None, plant_id="demo", verbose=True,
         response = client.messages.create(
             model=MODEL,
             max_tokens=2000,
-            system=SYSTEM_PROMPT,
+            # Cached because this prefix is identical on every turn of every
+            # question, and it is not small: the system prompt and the tool
+            # schemas together are ~12k tokens, re-sent up to MAX_TURNS times
+            # within a single question. Marking the last block caches
+            # everything before it, so one breakpoint covers both.
+            #
+            # This matters more the moment the document catalogue joins this
+            # prefix. That is another ~48k tokens, and uncached it would cost
+            # ten times as much on every turn.
+            system=[
+                {
+                    "type": "text",
+                    "text": SYSTEM_PROMPT,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
             tools=TOOL_SCHEMAS,
             messages=messages,
         )
